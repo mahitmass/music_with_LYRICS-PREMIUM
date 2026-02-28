@@ -22,8 +22,7 @@ jobs:
 
       - name: Build Mac (.dmg) file
         # Forces electron-builder to create a Mac installer
-        run: npx electron-builder --mac 
-
+run: npx electron-builder --mac --publish never
       - name: Upload the final Mac app
         uses: actions/upload-artifact@v4
         with:
