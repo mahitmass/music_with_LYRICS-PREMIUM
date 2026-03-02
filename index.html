@@ -7,6 +7,24 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
   
   <style>
+    /* BIGGER AMBIENT GLOW ARROW */
+    .queue-hint { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.1); z-index: 12; pointer-events: none; display: none; font-size: 55px; animation: ambientPulse 3s ease-in-out infinite; }
+    body.immersive .queue-hint { display: block; }
+    .hover-queue-hitbox:hover ~ .queue-hint, .hover-queue:hover ~ .queue-hint, .hover-queue.force-open ~ .queue-hint { opacity: 0; transition: 0.2s; }
+    
+    @keyframes ambientPulse { 
+      0%, 100% { opacity: 0.05; text-shadow: 0 0 0px rgba(76,194,255,0); } 
+      50% { opacity: 0.6; text-shadow: 0 0 25px rgba(76,194,255,0.7); } 
+    }
+
+    /* RED HOVER FOR DELETE BUTTON */
+    .del-btn { cursor: pointer; padding: 15px 15px; pointer-events: auto; border-radius: 6px; transition: 0.2s; color: var(--dim); display: flex; align-items: center; justify-content: center; }
+    .del-btn:hover { background: rgba(255, 76, 76, 0.15); color: #ff4c4c; }
+
+    /* FIX: STOP BACKGROUND TEXT SELECTION ON DOUBLE TAP */
+    .lyrics-view { user-select: none; -webkit-user-select: none; }
+    .lyric-line { user-select: text; -webkit-user-select: text; }
+
     :root { --bg: #0b0b0b; --panel: #161616; --accent: #4cc2ff; --dim: #888; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.5s ease; }
@@ -163,7 +181,7 @@
       <div class="hover-queue" id="hover-q">
         <h3 style="margin-bottom: 15px; color: var(--dim); font-size: 0.9rem;">Coming Up Next</h3>
         <div class="list-container" id="hover-queue-list"></div>
-      </div>
+      </div><span class="material-icons-round queue-hint">chevron_left</span>
     </div>
   </div>
 
@@ -202,7 +220,9 @@
     let draggedIdx = null;
     let currentSongId = ""; 
     let songSyncOffset = 0; 
-    let isEditing = false; 
+    let isEditing = false;
+    let isUserScrolling = false;
+    let lyricScrollTimeout; 
 
     const audio = document.getElementById('player');
     const lContent = document.getElementById('l-content');
@@ -230,7 +250,8 @@
           const s = queue[curIdx];
           document.getElementById('cur-t').innerText = s.t;
           document.getElementById('cur-a').innerText = s.a;
-          
+          currentSongId = s.a + " - " + s.t;
+          updateToolIcons();
           if(s.isOnline) {
             audio.src = s.p;
             document.getElementById('album-cover').src = s.cover;
@@ -241,6 +262,7 @@
             extractAlbumArt(s);
           }
           getLyrics(s);
+          scrollToCurrentSong();
         }
       }
     };
@@ -290,8 +312,7 @@
       
       // 2. Build Online UI Placeholder
       html += `<div style="padding:15px 10px 5px; color:var(--accent); font-size:0.75rem; font-weight:bold; letter-spacing:1px; text-transform:uppercase; border-top:1px solid #333; margin-top:5px;">Global Online Search</div>`;
-      html += `<div id="${targetId}-online"><div style="padding:15px; color:var(--dim); text-align:center; font-size: 0.85rem; display:flex; justify-content:center; align-items:center; gap:8px;">
-                <span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Searching the world...
+      html += `<div id="${targetId}-online" style="max-height: 250px; overflow-y: auto; padding-right: 5px;"><div style="padding:15px; color:var(--dim); text-align:center; font-size: 0.85rem; display:flex; justify-content:center; align-items:center; gap:8px;">                <span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Searching the world...
                </div></div>`;
 
       target.innerHTML = html;
@@ -307,23 +328,38 @@
       if(!container) return;
 
       try {
-        // Using a different public Python-based mirror
-        let res = await fetch(`https://saavnapi-nine.vercel.app/result/?query=${encodeURIComponent(query)}`);
+        // Upgraded to the ultimate, stable API with a 40-song limit
+        let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=40`);
         
         if (!res.ok) throw new Error("API Blocked");
         
-        let data = await res.json();
-
-        // This Python API returns the array directly or inside 'songs'
-        let results = Array.isArray(data) ? data : (data.songs || []);
+        let json = await res.json();
+        // The new API puts the songs inside data.results
+        let results = (json.data && json.data.results) ? json.data.results : [];
 
         if (results.length > 0) {
           let html = "";
-          results.slice(0, 10).forEach(song => {
-            let title = (song.song || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-            let artist = (song.singers || song.primary_artists || "Unknown").split(',')[0].trim();
-            let cover = song.image || '';
-            let downloadLink = song.media_url || '';
+          
+          results.forEach(song => {
+            let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+            
+            // Safely grab the main artist
+            let artist = "Unknown";
+            if (song.artists && song.artists.primary && song.artists.primary.length > 0) {
+                artist = song.artists.primary[0].name.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+            }
+
+            // Grab the highest resolution album cover
+            let cover = "";
+            if (song.image && song.image.length > 0) {
+                cover = song.image[song.image.length - 1].url;
+            }
+            
+            // Grab the highest quality 320kbps audio stream
+            let downloadLink = "";
+            if (song.downloadUrl && song.downloadUrl.length > 0) {
+                downloadLink = song.downloadUrl[song.downloadUrl.length - 1].url;
+            }
 
             if (downloadLink) {
               let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -332,18 +368,27 @@
               let safeDL = downloadLink.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
               html += `
-              <div class="item" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}')" style="cursor:pointer; border-left: 3px solid #4cc2ff;">
-                <img src="${cover}" style="width:35px; height:35px; border-radius:4px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
-                <div class="item-left" style="flex:1;"><span class="material-icons-round" style="font-size:16px; color:var(--dim);">cloud_download</span> ${title} - <small>${artist}</small></div>
+              <div class="item" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}')" style="cursor:pointer; border-left: 3px solid #4cc2ff; align-items: center; padding: 8px 10px;">
+                <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+                <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
+                  <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    <span class="material-icons-round" style="font-size:14px; color:var(--dim); vertical-align:middle; margin-right:4px;">cloud_download</span>${title}
+                  </div>
+                  <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${artist}
+                  </div>
+                </div>
               </div>`;
             }
           });
+          
           container.innerHTML = html || `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No playable streams found.</div>`;
         } else {
           container.innerHTML = `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No global results found.</div>`;
         }
       } catch (e) {
-        container.innerHTML = `<div style="padding:10px; color:#ff4c4c; text-align:center; font-size: 0.85rem;">Online Search Offline. Try again later.</div>`;
+        container.innerHTML = `<div style="padding:10px; color:#ff4c4c; text-align:center; font-size: 0.85rem;">Online Search Offline (${e.message}). Try again.</div>`;
+        console.error("Search Error for query:", query, e);
       }
     }
 
@@ -514,7 +559,11 @@
     }
 
     function getCleanTitle(s) {
-      return s.t.replace(/\(.*\)|\[.*\]|\{.*\}/g, '').replace(/lyrical|audio|video|official/gi, '').trim();
+      // The new .replace(/_/g, ' ') translates underscores into spaces behind the scenes!
+      return s.t.replace(/\(.*\)|\[.*\]|\{.*\}/g, '')
+                .replace(/lyrical|audio|video|official/gi, '')
+                .replace(/_/g, ' ') 
+                .trim();
     }
 
     function toggleEditMode() {
@@ -626,21 +675,33 @@
       const searchTerm = document.getElementById('sidebar-search').value;
       if(searchTerm) return; 
       
+      const qList = document.getElementById('queue-list');
+      const hList = document.getElementById('hover-queue-list');
+      
+      // 1. Save exactly where the user is currently scrolled!
+      const qScroll = qList ? qList.scrollTop : 0;
+      const hScroll = hList ? hList.scrollTop : 0;
+
       const html = queue.map((s, i) => {
         let icon = s.isOnline ? "cloud" : "drag_indicator";
         return `
         <div class="item ${i===curIdx?'active':''}" draggable="true" ondragstart="dragStart(event, ${i})" ondragend="dragEnd(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="drop(event, ${i})" onclick="play(${i})">
           <div class="item-left"><span class="material-icons-round drag-handle">${icon}</span> ${i+1}. ${s.t}</div>
-          <span class="del-btn" style="cursor:pointer; padding:5px; pointer-events:auto;" onclick="event.stopPropagation(); queue.splice(${i}, 1); if(${i} < curIdx) curIdx--; else if(${i} === curIdx && queue.length > 0) play(curIdx >= queue.length ? 0 : curIdx); draw(); saveState();">✕</span>
-        </div>
+          <div class="del-btn" onclick="event.stopPropagation(); queue.splice(${i}, 1); if(${i} < curIdx) curIdx--; else if(${i} === curIdx && queue.length > 0) play(curIdx >= queue.length ? 0 : curIdx); draw(); saveState();">✕</div>        </div>
       `}).join('');
-      document.getElementById('queue-list').innerHTML = html;
-      document.getElementById('hover-queue-list').innerHTML = html;
+      
+      if(qList) qList.innerHTML = html;
+      if(hList) hList.innerHTML = html;
+      
+      // 2. Instantly restore their scroll position so it never jumps!
+      if(qList) qList.scrollTop = qScroll;
+      if(hList) hList.scrollTop = hScroll;
     }
 
     function play(i) {
       if(i < 0 || i >= queue.length) return;
       curIdx = i; const s = queue[i];
+      isUserScrolling = false;
       document.getElementById('cur-t').innerText = s.t;
       document.getElementById('cur-a').innerText = s.a;
       
@@ -774,8 +835,12 @@
             const p = document.createElement('p'); p.className='lyric-line'; p.innerText=text;
             
             p.onclick = (e) => { 
-              if(isEditing) { e.stopPropagation(); return; }
-              audio.currentTime = time; 
+              // Respects the Grab shield and Edit mode
+              if(isEditing || window.isGrabbing) { e.stopPropagation(); return; }
+              
+              // FIX: Subtract the sync offset so it jumps to the exact right audio moment!
+              audio.currentTime = Math.max(0, time - songSyncOffset); 
+              
               if(audio.paused) audio.play(); 
             };
             lContent.appendChild(p);
@@ -787,8 +852,28 @@
     audio.addEventListener('play', () => document.getElementById('p-icon').innerText = 'pause');
     audio.addEventListener('pause', () => document.getElementById('p-icon').innerText = 'play_arrow');
     function togglePlay() { if(audio.src) audio.paused ? audio.play() : audio.pause(); }
-    function playNext() { play((curIdx+1)%queue.length); }
-    function playPrev() { play((curIdx-1+queue.length)%queue.length); }
+    function playNext() { 
+      // If there is another song, play it. If not, stop the music.
+      if (curIdx + 1 < queue.length) {
+        play(curIdx + 1); 
+      } else {
+        audio.pause();
+        audio.currentTime = 0;
+        document.getElementById('p-icon').innerText = 'play_arrow';
+      }
+    }
+    
+    function playPrev() { 
+      // If the song has been playing for 3 seconds, previous just restarts the track
+      if (audio.currentTime > 3) { 
+        audio.currentTime = 0; 
+        return; 
+      }
+      // Otherwise, go back a song (or stop if it's the very first song)
+      if (curIdx > 0) play(curIdx - 1); 
+      else audio.currentTime = 0;
+    }
+    
     function shuffleRemaining() {
       if(queue.length <= curIdx + 1) return;
       const remaining = queue.slice(curIdx + 1);
@@ -796,6 +881,30 @@
       queue = [...queue.slice(0, curIdx + 1), ...remaining]; draw(); saveState();
     }
     audio.onended = playNext;
+
+
+    // --- MANUAL LYRIC SCROLL COOLDOWN ---
+    function handleManualScroll(e) {
+      if (isEditing) return;
+      // Ignore tiny accidental trackpad bumps right after clicking
+      if (e && e.type === 'wheel' && Math.abs(e.deltaY) < 10) return; 
+      
+      isUserScrolling = true;
+      clearTimeout(lyricScrollTimeout);
+      
+      lyricScrollTimeout = setTimeout(() => {
+        isUserScrolling = false;
+        const ps = document.getElementsByClassName('lyric-line');
+        if (lyrIdx >= 0 && ps[lyrIdx]) {
+          lView.scrollTo({top: ps[lyrIdx].offsetTop - (lView.clientHeight/2) + 20, behavior:'smooth'});
+        }
+      }, 2000);
+    }
+
+    // Listen for mouse wheels, trackpad swipes, and scrollbar clicks
+    lView.addEventListener('wheel', handleManualScroll);
+    lView.addEventListener('touchmove', handleManualScroll);
+    lView.addEventListener('mousedown', handleManualScroll);
 
     audio.ontimeupdate = () => {
       if(!audio.duration) return;
@@ -814,13 +923,52 @@
         for(let p of ps) p.classList.remove('highlight');
         if(ps[act]) {
           ps[act].classList.add('highlight');
-          if (!isEditing) {
+          
+          // FIX: Now it only auto-scrolls if you are NOT editing AND NOT manually scrolling!
+          if (!isEditing && !isUserScrolling) {
             lView.scrollTo({top: ps[act].offsetTop - (lView.clientHeight/2) + 20, behavior:'smooth'});
           }
         }
       }
     };
     document.getElementById('pb').onclick = (e) => audio.currentTime = (e.offsetX / e.target.clientWidth) * audio.duration;
+    function scrollToCurrentSong() {
+      if(queue.length === 0) return;
+      
+      setTimeout(() => {
+        const isImmersive = document.body.classList.contains('immersive');
+        if (isImmersive) {
+           const hList = document.getElementById('hover-queue-list');
+           if(hList && hList.children[curIdx]) hList.children[curIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+           const qList = document.getElementById('queue-list');
+           if(qList && qList.children[curIdx]) qList.children[curIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 450); // Increased time to let the UI finish animating first!
+    }
+    // Double click background to toggle immersive view
+    // --- CLICK AND HOLD (GRAB) TO TOGGLE ---
+    window.isGrabbing = false;
+    let grabTimer;
+    const lViewEl = document.getElementById('l-view');
+
+    lViewEl.addEventListener('mousedown', (e) => {
+      if (isEditing) return;
+      // Prevent this from triggering if you are just clicking the scrollbar!
+      if (e.offsetX >= lViewEl.clientWidth - 15) return; 
+
+      window.isGrabbing = false; // Reset on a new click
+      
+      // If you hold the mouse down for 400ms, it counts as a "Grab"
+      grabTimer = setTimeout(() => {
+        window.isGrabbing = true; // Activate the shield!
+        toggleImmersive();
+      }, 400); 
+    });
+
+    // If you lift your finger early or move away, cancel the grab timer
+    lViewEl.addEventListener('mouseup', () => clearTimeout(grabTimer));
+    lViewEl.addEventListener('mouseleave', () => clearTimeout(grabTimer));
   </script>
 </body>
 </html>
