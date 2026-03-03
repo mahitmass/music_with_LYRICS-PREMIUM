@@ -7,14 +7,19 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
   
   <style>
-    /* BIGGER AMBIENT GLOW ARROW */
-    .queue-hint { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.1); z-index: 12; pointer-events: none; display: none; font-size: 55px; animation: ambientPulse 3s ease-in-out infinite; }
+    /* STATIC AMBIENT GLOW ARROW (Zero CPU Usage) */
+    .queue-hint { 
+      position: absolute; right: 20px; top: 50%; margin-top: -27px; 
+      color: rgba(255,255,255,0.2); 
+      text-shadow: 0 0 20px rgba(76,194,255,0.6); /* Permanent static glow */
+      z-index: 12; pointer-events: none; display: none; font-size: 55px; 
+      transition: opacity 0.3s ease; 
+    }
     body.immersive .queue-hint { display: block; }
-    .hover-queue-hitbox:hover ~ .queue-hint, .hover-queue:hover ~ .queue-hint, .hover-queue.force-open ~ .queue-hint { opacity: 0; transition: 0.2s; }
     
-    @keyframes ambientPulse { 
-      0%, 100% { opacity: 0.05; text-shadow: 0 0 0px rgba(76,194,255,0); } 
-      50% { opacity: 0.6; text-shadow: 0 0 25px rgba(76,194,255,0.7); } 
+    /* It still cleanly fades away when you hover to open the menu */
+    .hover-queue-hitbox:hover ~ .queue-hint, .hover-queue:hover ~ .queue-hint, .hover-queue.force-open ~ .queue-hint { 
+      opacity: 0; 
     }
 
     /* RED HOVER FOR DELETE BUTTON */
@@ -29,7 +34,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; height: 100vh; display: flex; flex-direction: column; overflow: hidden; transition: background 0.5s ease; }
     
-    #bg-blur { position: absolute; top: 0; left: 0; width: 100%; height: 100%; filter: blur(80px) brightness(0.3); opacity: 0; transition: opacity 1s ease, background-image 1s ease; z-index: -1; pointer-events: none; background-size: cover; background-position: center; }
+    #bg-blur { position: absolute; top: 0; left: 0; width: 100%; height: 100%; filter: blur(80px) brightness(0.3); opacity: 0; transition: opacity 1s ease, background-image 1s ease; z-index: -1; pointer-events: none; background-size: cover; background-position: center; transform: translateZ(0); will-change: opacity, background-image; }
     body.immersive #bg-blur { opacity: 1; }
 
     .main { display: flex; flex: 1; height: calc(100vh - 100px); position: relative; }
@@ -118,7 +123,7 @@
     .play-btn { background: var(--accent); color: black; border-radius: 50%; width: 50px; height: 50px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
     .play-btn:hover { transform: scale(1.1); }
     .progress-bar { width: 100%; height: 6px; background: #333; border-radius: 10px; cursor: pointer; position: relative; }
-    .progress-fill { height: 100%; background: var(--accent); width: 0%; border-radius: 10px; pointer-events: none; }
+    .progress-fill { height: 100%; background: var(--accent); width: 0%; border-radius: 10px; pointer-events: none; will-change: width; }
 
     /* Loading animation for search */
     @keyframes spin { 100% { transform: rotate(360deg); } }
@@ -148,7 +153,7 @@
       
       <input type="text" class="search-box" id="sidebar-search" placeholder="Search to Play Next..." oninput="filterQueue(this.value, 'queue-list')">
       
-      <div class="list-container" id="queue-list" onscroll="handleScroll()"></div>
+      <div class="list-container" id="queue-list" onscroll="handleManualScroll(event)"></div>
     </div>
 
     <div style="flex:1; display:flex; flex-direction:column; position:relative;">
@@ -192,7 +197,7 @@
     </div>
     <div class="controls">
       <div style="display:flex; gap:25px; align-items:center">
-        <span class="material-icons-round" onclick="shuffleRemaining()" style="cursor:pointer; color:var(--dim)" title="Shuffle Remaining">shuffle</span>
+        <span class="material-icons-round" id="btn-toggle-lyrics" onclick="toggleLyrics()" style="cursor:pointer;" title="Toggle Lyrics CPU Mode">subtitles</span>        <span class="material-icons-round" onclick="shuffleRemaining()" style="cursor:pointer; color:var(--dim)" title="Shuffle Remaining">shuffle</span>
         <span class="material-icons-round" onclick="playPrev()" style="cursor:pointer">skip_previous</span>
         <button class="play-btn" onclick="togglePlay()"><span class="material-icons-round" id="p-icon" style="font-size:32px">play_arrow</span></button>
         <span class="material-icons-round" onclick="playNext()" style="cursor:pointer">skip_next</span>
@@ -201,7 +206,7 @@
         <small id="c-time" style="width:40px">0:00</small>
         <div class="progress-bar" id="pb"><div class="progress-fill" id="fill"></div></div>
         <small id="t-time" style="width:40px">0:00</small>
-      </div>
+      </div>    
     </div>
     <div style="width:25%; display:flex; justify-content:flex-end; align-items:center;">
       <span class="material-icons-round" style="margin-right:10px; color:var(--dim)">volume_up</span>
@@ -212,6 +217,8 @@
   <audio id="player"></audio>
 
   <script>
+    // Checks computer memory to see if you left lyrics ON or OFF last time
+    let lyricsEnabled = localStorage.getItem('lyricsEnabled') !== 'false';
     const { webUtils, ipcRenderer } = require('electron');
     const fs = require('fs');
     const path = require('path');
@@ -239,6 +246,11 @@
     });
 
     window.onload = () => {
+      const btn = document.getElementById('btn-toggle-lyrics');
+      if (btn) {
+        btn.style.color = lyricsEnabled ? 'var(--accent)' : 'var(--dim)';
+        btn.innerText = lyricsEnabled ? 'subtitles' : 'subtitles_off';
+      }
       volSlider.value = localStorage.getItem('playerVol') || 1;
       audio.volume = volSlider.value;
       const savedQueue = localStorage.getItem('playerQueue');
@@ -492,36 +504,74 @@
       navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
     }
 
-    function dragStart(e, i) { draggedIdx = i; }
-    function dragEnd(e) { draggedIdx = null; document.querySelectorAll('.item').forEach(el => el.classList.remove('drag-target')); }
+    function dragStart(e, i) { 
+      e.dataTransfer.setData('text/plain', i); 
+      // Ghost effect
+      setTimeout(() => e.target.style.opacity = '0.01', 0); 
+    }
+
+    function dragEnd(e) { 
+      e.target.style.opacity = '1'; 
+      draw(); 
+    }
+
     function dragOver(e) { 
       e.preventDefault(); 
+      
+      // 1. YOUR ORIGINAL FEATURE: Auto-scroll the list if you drag near the edges
       const container = e.currentTarget.closest('.list-container');
       if(container) {
-        const rect = container.getBoundingClientRect();
-        const y = e.clientY - rect.top;
+        const cRect = container.getBoundingClientRect();
+        const y = e.clientY - cRect.top;
         if(y < 60) container.scrollTop -= (60 - y) * 0.4; 
-        else if(y > rect.height - 60) container.scrollTop += (y - (rect.height - 60)) * 0.4; 
+        else if(y > cRect.height - 60) container.scrollTop += (y - (cRect.height - 60)) * 0.4; 
       }
-      document.querySelectorAll('.item').forEach(el => el.classList.remove('drag-target'));
-      e.currentTarget.classList.add('drag-target');
+
+      // 2. NEW FEATURE: Perfect blue line placement using box-shadow
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (e.clientY > rect.top + rect.height / 2) {
+        e.currentTarget.style.boxShadow = '0 2px 0 var(--accent)';
+      } else {
+        e.currentTarget.style.boxShadow = '0 -2px 0 var(--accent)';
+      }
     }
-    function dragLeave(e) { e.currentTarget.classList.remove('drag-target'); }
+
+    function dragLeave(e) { 
+      e.currentTarget.style.boxShadow = ''; 
+    }
 
     function drop(e, i) {
-      e.preventDefault(); e.stopPropagation();
-      document.querySelectorAll('.item').forEach(el => el.classList.remove('drag-target'));
-      if (draggedIdx !== null) {
-        if(draggedIdx === i) return;
-        const item = queue.splice(draggedIdx, 1)[0];
-        queue.splice(i, 0, item);
-        if(curIdx === draggedIdx) curIdx = i;
-        else if(draggedIdx < curIdx && i >= curIdx) curIdx--;
-        else if(draggedIdx > curIdx && i <= curIdx) curIdx++;
-        draggedIdx = null; draw(); saveState();
-      } else {
-        if (e.dataTransfer.files.length > 0) insertFilesAt(e.dataTransfer.files, i);
+      e.preventDefault(); 
+      e.stopPropagation();
+      e.currentTarget.style.boxShadow = '';
+      
+      const fromText = e.dataTransfer.getData('text/plain');
+      
+      // 3. YOUR ORIGINAL FEATURE: If it's a file from your desktop, insert it!
+      if (!fromText && e.dataTransfer.files.length > 0) {
+        insertFilesAt(e.dataTransfer.files, i);
+        return;
       }
+
+      // 4. NEW FEATURE: Perfect Reordering Math
+      const from = parseInt(fromText);
+      if (from === i || isNaN(from)) return;
+      
+      const rect = e.currentTarget.getBoundingClientRect();
+      let insertAt = i;
+      
+      if (e.clientY > rect.top + rect.height / 2) insertAt++;
+      if (from < insertAt) insertAt--;
+      if (from === insertAt) return; 
+
+      const [moved] = queue.splice(from, 1);
+      queue.splice(insertAt, 0, moved);
+      
+      if (curIdx === from) curIdx = insertAt; 
+      else if (from < curIdx && insertAt >= curIdx) curIdx--; 
+      else if (from > curIdx && insertAt <= curIdx) curIdx++;
+      
+      draw(); saveState();
     }
 
     function updateToolIcons() {
@@ -559,11 +609,27 @@
     }
 
     function getCleanTitle(s) {
-      // The new .replace(/_/g, ' ') translates underscores into spaces behind the scenes!
-      return s.t.replace(/\(.*\)|\[.*\]|\{.*\}/g, '')
-                .replace(/lyrical|audio|video|official/gi, '')
-                .replace(/_/g, ' ') 
-                .trim();
+      let title = s.t;
+      
+      // AGGRESSIVE CHOP: If the title looks like "Singer, Singer - Real Title", 
+      // this splits it at the hyphen and ONLY keeps the actual title at the end!
+      if (title.includes('-')) {
+        let parts = title.split('-');
+        title = parts[parts.length - 1]; 
+      }
+      
+      return title.replace(/\(.*\)|\[.*\]|\{.*\}/g, '') // Deletes (From Monica Darling)
+                  .replace(/lyrical|audio|video|official/gi, '') // Deletes junk words
+                  .replace(/_/g, ' ') // Fixes underscores
+                  .replace(/^[-\s]+|[-\s]+$/g, '') // Cleans up leftover spaces or dashes
+                  .trim();
+    }
+
+    function getPrimaryArtist(artistStr) {
+      if (!artistStr) return "";
+      // AGGRESSIVE CHOP: Splits at the first comma, &, |, or the words "and", "ft", "feat"
+      // It completely ignores everyone except the very first singer.
+      return artistStr.split(/[,&|\-]|feat\.?|ft\.?|\band\b/i)[0].trim();
     }
 
     function toggleEditMode() {
@@ -753,74 +819,148 @@
       document.getElementById('bg-blur').style.backgroundImage = `linear-gradient(45deg, ${c1}, ${c2})`;
     }
 
-    async function getLyrics(s) {
-      lyrics = []; lyrIdx = -1;
-      if(localStorage.getItem('noLyr_' + currentSongId)) {
-        lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">Lyrics disabled for this track.</p>'; return;
+    // --- TOGGLE LYRICS ---
+// --- TOGGLE LYRICS ---
+function toggleLyrics() {
+  lyricsEnabled = !lyricsEnabled;
+  localStorage.setItem('lyricsEnabled', lyricsEnabled);
+  
+  const btn = document.getElementById('btn-toggle-lyrics');
+  if (btn) {
+    btn.style.color = lyricsEnabled ? 'var(--accent)' : 'var(--dim)';
+    btn.innerText = lyricsEnabled ? 'subtitles' : 'subtitles_off';
+  }
+
+  if (lyricsEnabled) {
+    // FIX: Inject into lContent, NOT l-view, so we don't destroy the lyrics container!
+    lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">Waking up lyrics...</p>';
+    
+    if (typeof queue !== 'undefined' && queue.length > 0 && queue[curIdx]) {
+       setTimeout(() => {
+         getLyrics(queue[curIdx]);
+       }, 50);
+    } else {
+       lContent.innerHTML = '<div style="padding:20px; text-align:center; color:var(--dim);">No song currently playing.</div>';
+    }
+  } else {
+    lyrics = [];
+    lContent.innerHTML = `<div style="padding: 20px; color: var(--dim); text-align: center; margin-top: 50%; transform: translateY(-50%); font-size: 0.95rem;">Lyrics are disabled to save power.<br><span style="font-size: 0.8rem; opacity: 0.7;">Click the <span class="material-icons-round" style="font-size: 16px; vertical-align: middle;">subtitles_off</span> button to enable.</span></div>`;
+  }
+}
+
+  // --- FETCH LYRICS ---
+  async function getLyrics(s) {
+    if (!lyricsEnabled) {
+      lyrics = [];
+      lContent.innerHTML = `<div style="padding: 20px; color: var(--dim); text-align: center; margin-top: 50%; transform: translateY(-50%); font-size: 0.95rem;">Lyrics are disabled to save power.</div>`;
+      return;
+    }
+
+    try {
+      const cSongId = s.id || s.p; 
+      lyrics = []; 
+      lyrIdx = -1;
+      
+      if(localStorage.getItem('noLyr_' + cSongId)) {
+        lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">Lyrics disabled for this track.</p>'; 
+        return;
       }
       
       let cleanTitle = getCleanTitle(s);
       let lDir, lPath;
       
-      // 1. Read existing local or custom lyrics depending on source
+      // 1. Local Read
       if (!s.isOnline) {
         lDir = path.join(path.dirname(s.p), 'Lyrics');
         lPath = path.join(lDir, s.a + ' - ' + cleanTitle + '.lrc');
-        if(fs.existsSync(lPath)) { show(fs.readFileSync(lPath, 'utf8')); return; }
+        if(fs.existsSync(lPath)) { 
+            show(fs.readFileSync(lPath, 'utf8')); 
+            return; 
+        }
       } else {
-        const savedCustom = localStorage.getItem('lyric_custom_' + currentSongId);
+        const savedCustom = localStorage.getItem('lyric_custom_' + cSongId);
         if (savedCustom) { show(savedCustom); return; }
       }
 
-      if(localStorage.getItem('apiEmpty_' + currentSongId)) {
-         lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No lyrics in database. Use Edit to add manually.</p>'; return;
+      if(localStorage.getItem('apiEmpty_' + cSongId)) {
+        lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No lyrics in database.</p>'; return;
       }
 
       lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">Searching the database...</p>';
       
-      try {
-        const headers = { 'User-Agent': 'ProMediaPlayer/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
-        let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(s.a)}`, { headers });
-        if (res.status === 429 || res.status === 403) {
-          lContent.innerHTML = '<p class="lyric-line" style="opacity:1; color:#ff4c4c;">API Cooldown. Waiting...</p>'; return;
-        }
-        let data = await res.json();
-        
-        if(!data || !data[0]?.syncedLyrics) {
-          res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(s.a + ' ' + cleanTitle)}`, { headers });
-          if(res.ok) data = await res.json();
-        }
-        
-        let finalLyrics = data && data[0] ? data[0].syncedLyrics : null;
+      const headers = { 'User-Agent': 'ProMediaPlayer/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
+      
+      // Set up our smart variables
+      const fullTitle = s.t;
+      const fullArtist = s.a || '';
+      const primaryArtist = getPrimaryArtist(fullArtist);
+      
+      let data = null;
+      let finalLyrics = null;
 
-        if (finalLyrics) {
-          const nativeScriptRegex = /[\u0400-\u04FF\u0370-\u03FF\u0900-\u0DFF\u0600-\u06FF\u3000-\u9FFF\uAC00-\uD7AF]/;
-          if (nativeScriptRegex.test(finalLyrics)) {
-            lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">Native script detected. Searching for Romanized version...</p>';
-            let romRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' romanized')}`, { headers });
-            if (romRes.ok) {
-              let romData = await romRes.json();
-              if (romData && romData[0]?.syncedLyrics && !nativeScriptRegex.test(romData[0].syncedLyrics)) {
-                finalLyrics = romData[0].syncedLyrics;
-              }
+      // ATTEMPT 1: Exact Match (Raw Metadata)
+      let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(fullTitle)}&artist_name=${encodeURIComponent(fullArtist)}`, { headers });
+      if (res.status === 429 || res.status === 403) {
+        lContent.innerHTML = '<p class="lyric-line" style="opacity:1; color:#ff4c4c;">API Cooldown. Waiting...</p>'; return;
+      }
+      if (res.ok) {
+        data = await res.json();
+        if (data && data[0]?.syncedLyrics) finalLyrics = data[0].syncedLyrics;
+      }
+
+      // ATTEMPT 2: Cleaned Match (Primary Artist + Clean Title without brackets)
+      if (!finalLyrics) {
+        res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(primaryArtist)}`, { headers });
+        if (res.ok) {
+          data = await res.json();
+          if (data && data[0]?.syncedLyrics) finalLyrics = data[0].syncedLyrics;
+        }
+      }
+
+      // ATTEMPT 3: Broad Fuzzy Search (Smooshed together)
+      if (!finalLyrics) {
+        res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(primaryArtist + ' ' + cleanTitle)}`, { headers });
+        if (res.ok) {
+          data = await res.json();
+          if (data && data[0]?.syncedLyrics) finalLyrics = data[0].syncedLyrics;
+        }
+      }
+
+      // If we finally got lyrics from any of the 3 attempts, handle them:
+      if (finalLyrics) {
+        const nativeScriptRegex = /[\u0400-\u04FF\u0370-\u03FF\u0900-\u0DFF\u0600-\u06FF\u3000-\u9FFF\uAC00-\uD7AF]/;
+        if (nativeScriptRegex.test(finalLyrics)) {
+          lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">Searching for Romanized version...</p>';
+          let romRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' romanized')}`, { headers });
+          if (romRes.ok) {
+            let romData = await romRes.json();
+            if (romData && romData[0]?.syncedLyrics && !nativeScriptRegex.test(romData[0].syncedLyrics)) {
+              finalLyrics = romData[0].syncedLyrics;
             }
           }
         }
         
-        if(finalLyrics) {
-          if (!s.isOnline) {
-            if(!fs.existsSync(lDir)) fs.mkdirSync(lDir);
-            fs.writeFileSync(lPath, finalLyrics);
-          } else {
-            localStorage.setItem('lyric_custom_' + currentSongId, finalLyrics);
-          }
-          show(finalLyrics);
-        } else { 
-          localStorage.setItem('apiEmpty_' + currentSongId, "true");
-          lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No synced lyrics found in database.</p>'; 
+        // Save and Show
+        if (!s.isOnline) {
+          if(!fs.existsSync(lDir)) fs.mkdirSync(lDir);
+          // Write using the raw data so it maps correctly next time
+          fs.writeFileSync(path.join(lDir, s.a + ' - ' + cleanTitle + '.lrc'), finalLyrics);
+        } else {
+          localStorage.setItem('lyric_custom_' + cSongId, finalLyrics);
         }
-      } catch(e) { lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">Network/Connection Error.</p>'; }
+        show(finalLyrics); 
+        
+      } else { 
+        // All 3 attempts failed.
+        localStorage.setItem('apiEmpty_' + cSongId, "true");
+        lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No synced lyrics found in database.</p>'; 
+      }
+
+    } catch(e) { 
+      console.error("Lyric Fetch Error:", e);
+      lContent.innerHTML = `<p class="lyric-line" style="opacity: 1; filter:blur(0); color:#ff4c4c;">App Error: ${e.message}</p>`; 
     }
+  }
 
     function show(lrc) {
       lContent.innerHTML = '';
@@ -883,9 +1023,11 @@
     audio.onended = playNext;
 
 
-    // --- MANUAL LYRIC SCROLL COOLDOWN ---
+    // --- SCROLL HANDLING ---
+
+
     function handleManualScroll(e) {
-      if (isEditing) return;
+      if (typeof isEditing !== 'undefined' && isEditing) return;
       // Ignore tiny accidental trackpad bumps right after clicking
       if (e && e.type === 'wheel' && Math.abs(e.deltaY) < 10) return; 
       
@@ -895,16 +1037,20 @@
       lyricScrollTimeout = setTimeout(() => {
         isUserScrolling = false;
         const ps = document.getElementsByClassName('lyric-line');
-        if (lyrIdx >= 0 && ps[lyrIdx]) {
+        const lView = document.getElementById('l-view');
+        if (lView && typeof lyrIdx !== 'undefined' && lyrIdx >= 0 && ps[lyrIdx]) {
           lView.scrollTo({top: ps[lyrIdx].offsetTop - (lView.clientHeight/2) + 20, behavior:'smooth'});
         }
       }, 2000);
     }
 
     // Listen for mouse wheels, trackpad swipes, and scrollbar clicks
-    lView.addEventListener('wheel', handleManualScroll);
-    lView.addEventListener('touchmove', handleManualScroll);
-    lView.addEventListener('mousedown', handleManualScroll);
+    const lViewElement = document.getElementById('l-view');
+    if (lViewElement) {
+      lViewElement.addEventListener('wheel', handleManualScroll);
+      lViewElement.addEventListener('touchmove', handleManualScroll);
+      lViewElement.addEventListener('mousedown', handleManualScroll);
+    }
 
     audio.ontimeupdate = () => {
       if(!audio.duration) return;
@@ -913,20 +1059,21 @@
       document.getElementById('c-time').innerText = fmt(audio.currentTime);
       document.getElementById('t-time').innerText = fmt(audio.duration);
 
-      let act = -1;
-      const adjustedTime = audio.currentTime + songSyncOffset;
-      for(let i=0; i<lyrics.length; i++) { if(adjustedTime >= lyrics[i].time) act = i; else break; }
-      
-      if(act !== -1 && act !== lyrIdx) {
-        lyrIdx = act;
-        const ps = document.getElementsByClassName('lyric-line');
-        for(let p of ps) p.classList.remove('highlight');
-        if(ps[act]) {
-          ps[act].classList.add('highlight');
-          
-          // FIX: Now it only auto-scrolls if you are NOT editing AND NOT manually scrolling!
-          if (!isEditing && !isUserScrolling) {
-            lView.scrollTo({top: ps[act].offsetTop - (lView.clientHeight/2) + 20, behavior:'smooth'});
+      // Only do the heavy math and scrolling if lyrics are actually enabled!
+      if (lyricsEnabled && lyrics.length > 0) {
+        let act = -1;
+        const adjustedTime = audio.currentTime + songSyncOffset;
+        for(let i=0; i<lyrics.length; i++) { if(adjustedTime >= lyrics[i].time) act = i; else break; }
+        
+        if(act !== -1 && act !== lyrIdx) {
+          lyrIdx = act;
+          const ps = document.getElementsByClassName('lyric-line');
+          for(let p of ps) p.classList.remove('highlight');
+          if(ps[act]) {
+            ps[act].classList.add('highlight');
+            if (!isEditing && !isUserScrolling) {
+              lView.scrollTo({top: ps[act].offsetTop - (lView.clientHeight/2) + 20, behavior:'smooth'});
+            }
           }
         }
       }
