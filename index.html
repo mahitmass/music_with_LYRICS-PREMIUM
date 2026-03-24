@@ -832,10 +832,57 @@ function toggleLyrics() {
   }
 }
 
+// --- AI LYRICS GENERATOR ---
+let aiWorker = null;
+
+async function generateAILyrics(song) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            // 1. Initialize the Web Worker if it doesn't exist
+            if (!aiWorker) {
+                aiWorker = new Worker(new URL('./ai-worker.js', import.meta.url), { type: 'module' });
+            }
+
+            lContent.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--accent);">
+                <span class="material-icons-round" style="animation: spin 2s linear infinite; font-size: 40px; margin-bottom: 10px;">memory</span>
+                <div id="ai-status">Preparing audio for AI...</div>
+            </div>`;
+
+            // 2. Read the MP3 file and decode it into raw audio data for the AI
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            const response = await fetch(`file://${song.p.replace(/\\/g, '/')}`);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            // Extract just the audio channel data (Float32Array)
+            const audioData = audioBuffer.getChannelData(0); 
+
+            // 3. Listen for updates from the Worker
+            aiWorker.onmessage = (event) => {
+                const data = event.data;
+                const statusDiv = document.getElementById('ai-status');
+                
+                if (data.status === 'loading' || data.status === 'processing') {
+                    if (statusDiv) statusDiv.innerText = data.message;
+                } else if (data.status === 'done') {
+                    resolve(data.lrc); // SUCCESS! Pass the lyrics back
+                } else if (data.status === 'error') {
+                    reject(new Error(data.message));
+                }
+            };
+
+            // 4. Send the audio to the Worker to start processing
+            aiWorker.postMessage({ audioData: audioData, sampleRate: 16000 });
+
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
 // --- FETCH LYRICS ---
 async function getLyrics(s) {
-  // FIX: Removed the local variables that overwrote lContent and lView.
-  // We will strictly use the global lContent and lView variables defined at the top of your file.
+  // We strictly use the global lContent and lView variables defined at the top of your file.
 
   if (!lyricsEnabled) {
     lyrics = [];
@@ -870,7 +917,8 @@ async function getLyrics(s) {
       if (savedCustom) { show(savedCustom); return; }
     }
 
-    if(localStorage.getItem('apiEmpty_' + cSongId)) {
+    // Only skip trying if it's an online song that we already know has no lyrics
+    if(s.isOnline && localStorage.getItem('apiEmpty_' + cSongId)) {
        lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No lyrics in database.</p>'; return;
     }
 
@@ -908,6 +956,7 @@ async function getLyrics(s) {
     }
     
     if(finalLyrics) {
+      // INTERNET SUCCESS
       if (!s.isOnline) {
         if(!fs.existsSync(lDir)) fs.mkdirSync(lDir);
         fs.writeFileSync(lPath, finalLyrics);
@@ -915,9 +964,32 @@ async function getLyrics(s) {
         localStorage.setItem('lyric_custom_' + cSongId, finalLyrics);
       }
       show(finalLyrics); 
+      
     } else { 
-      localStorage.setItem('apiEmpty_' + cSongId, "true");
-      lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No synced lyrics found in database.</p>'; 
+      // INTERNET FAILED -> TRIGGER AI FALLBACK FOR LOCAL SONGS
+      if (!s.isOnline) {
+          try {
+              finalLyrics = await generateAILyrics(s);
+              
+              if (finalLyrics && finalLyrics.trim().length > 0) {
+                  if(!fs.existsSync(lDir)) fs.mkdirSync(lDir);
+                  fs.writeFileSync(lPath, finalLyrics);
+                  show(finalLyrics);
+                  // Clear the flag just in case it was set previously
+                  localStorage.removeItem('apiEmpty_' + cSongId); 
+              } else {
+                  throw new Error("AI returned empty lyrics.");
+              }
+          } catch (aiError) {
+              console.error("AI Generation Failed:", aiError);
+              localStorage.setItem('apiEmpty_' + cSongId, "true");
+              lContent.innerHTML = `<p class="lyric-line" style="opacity: 1; filter:blur(0)">No lyrics found & AI Failed.</p>`; 
+          }
+      } else {
+          // Online song failed internet search (can't run AI on streams easily)
+          localStorage.setItem('apiEmpty_' + cSongId, "true");
+          lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No synced lyrics found in database.</p>'; 
+      }
     }
 
   } catch(e) { 
