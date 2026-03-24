@@ -838,9 +838,10 @@ let aiWorker = null;
 async function generateAILyrics(song) {
     return new Promise(async (resolve, reject) => {
         try {
-            // 1. Initialize the Web Worker if it doesn't exist
+            // 1. Initialize the Web Worker (FIXED: Removed import.meta.url)
             if (!aiWorker) {
-                aiWorker = new Worker(new URL('./ai-worker.js', import.meta.url), { type: 'module' });
+                aiWorker = new Worker('./ai-worker.js', { type: 'module' });
+                aiWorker.onerror = (err) => console.error("Worker crashed:", err.message);
             }
 
             lContent.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--accent);">
@@ -850,10 +851,10 @@ async function generateAILyrics(song) {
 
             // 2. Read the MP3 file and decode it into raw audio data for the AI
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-            const response = await fetch(`file://${song.p.replace(/\\/g, '/')}`);
-            const arrayBuffer = await response.arrayBuffer();
+            const fileBuffer = fs.readFileSync(song.p);
+            const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
+
             // Extract just the audio channel data (Float32Array)
             const audioData = audioBuffer.getChannelData(0); 
 
