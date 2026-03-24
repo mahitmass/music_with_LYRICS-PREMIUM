@@ -29,6 +29,16 @@ if (!gotTheLock) {
         nodeIntegration: true, contextIsolation: false, webSecurity: false, backgroundThrottling: false
       }
     });
+    // --- AI WASM PERMISSION START ---
+    win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': ["script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob: 'wasm-unsafe-eval'; object-src 'none';"]
+        }
+      });
+    });
+    // --- AI WASM PERMISSION END ---
     win.loadFile('index.html');
     powerSaveBlocker.start('prevent-app-suspension'); 
     
