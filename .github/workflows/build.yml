@@ -1,0 +1,32 @@
+
+name: Build Mac App
+
+# This allows you to trigger the build manually from the GitHub website
+on: 
+  workflow_dispatch: 
+
+jobs:
+  build-mac:
+    runs-on: macos-latest # Tells GitHub to use an Apple Mac server
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Mac (.dmg) file
+        # Forces electron-builder to create a Mac installer
+        run: npx electron-builder --mac --publish never
+
+      - name: Upload the final Mac app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mac-Installer
+          path: dist/*.dmg
