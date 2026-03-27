@@ -1,32 +1,24 @@
-// Use the official CDN link for the Transformers library
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// Set up the environment to cache the model locally after downloading
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 let transcriber = null;
 
 self.onmessage = async (event) => {
-    const { audioData } = event.data;
+    const { audioData, songPath } = event.data;
 
     try {
         if (!transcriber) {
-            self.postMessage({ status: 'loading', message: 'Downloading AI Brain (First time only)...' });
-            // Using the smallest, fastest English model
             transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
         }
 
-        self.postMessage({ status: 'processing', message: 'AI is listening to the song...' });
-
-        // Run the transcription
         const output = await transcriber(audioData, {
             chunk_length_s: 30,
             stride_length_s: 5,
             return_timestamps: true,
         });
 
-        // Convert the AI output into .lrc format
         let lrcText = "";
         output.chunks.forEach(chunk => {
             const ms = chunk.timestamp[0];
@@ -35,9 +27,9 @@ self.onmessage = async (event) => {
             lrcText += `[${m}:${s}] ${chunk.text.trim()}\n`;
         });
 
-        self.postMessage({ status: 'done', lrc: lrcText });
+        self.postMessage({ status: 'done', lrc: lrcText, songPath: songPath });
 
     } catch (error) {
-        self.postMessage({ status: 'error', message: error.message });
+        self.postMessage({ status: 'error', message: error.message, songPath: songPath });
     }
 };
