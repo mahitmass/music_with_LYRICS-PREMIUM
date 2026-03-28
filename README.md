@@ -24,7 +24,7 @@ If you just want to listen to music:
 To modify the code or run via terminal:
 1.  **Clone the repository**:
     ```powershell
-    git clone [https://github.com/mahitmass/music_with_LYRICS.git](https://github.com/mahitmass/music_with_LYRICS.git)
+    git clone https://github.com/mahitmass/music_with_LYRICS.git
     cd music_with_LYRICS
     ```
 2.  **Install Dependencies**: Recreates the `node_modules` folder.
