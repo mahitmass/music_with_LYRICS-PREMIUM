@@ -36,7 +36,7 @@ npm install
 ```bash
 npm start
 ```
-##✨ AI & Smart Sync Features
+## ✨ AI & Smart Sync Features
 Background AI Queue: Queue up multiple plain-text songs for AI synchronization. The app processes them sequentially in the background without freezing your music.
 
 "Rubber Band" Interpolation: Custom AI logic that anchors known words and mathematically stretches the timestamps in between, making it impossible for fast songs (like rap or remixes) to drift out of sync.
@@ -45,7 +45,7 @@ Smart Duration Sorting: When searching for alternative lyrics, the app automatic
 
 Fallback Generator: If the database is completely empty, you can force the AI to transcribe and time the lyrics entirely from scratch directly from the Retry menu.
 
-##🎧 Key Player Features
+## 🎧 Key Player Features
 Cinematic Idle Fade: If the app is left running in the background for 10 minutes, the player controls gracefully fade out to provide a gorgeous, distraction-free "Screenshot Mode."
 
 Precision Auto-Scroller: The queue automatically and silently snaps the currently playing song to the dead center of your screen, whether you are in the sidebar or Immersive mode.
@@ -58,7 +58,7 @@ Interactive Lyrics: Click any line in the lyrics view to jump the song instantly
 
 Persistent Memory: Remembers your queue, your last played track, and your custom sync offsets for every individual song, even after closing the app.
 
-##🛠 Technical Stack
+## 🛠 Technical Stack
 Framework: Electron.js (Node.js & Chromium)
 
 Frontend: Vanilla JavaScript, HTML5, CSS3
