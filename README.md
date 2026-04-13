@@ -1,64 +1,67 @@
-# 🎵 Pro Media Player
+🎵 Mass Media Player Pro
+A lightning-fast, high-fidelity desktop music player built with Electron and Node.js. Designed for uninterrupted listening, it bypasses heavy scraping where possible for instant playback and features a custom-built immersive lyrics engine.
 
-A premium, lightweight desktop music player designed for high-quality local listening with **AI-Powered Synced Lyrics** and **Immersive Visuals**.
+✨ Core Features
+⚡ Instant Audio Engine: Global search is routed directly through the JioSaavn API to fetch .mp4 and .m4a audio streams instantly, completely bypassing slow YouTube audio-resolution steps for single tracks.
 
----
+♾️ Invincible Playlist Scraper: Paste any YouTube Music playlist link directly into the search bar. A custom recursive token-hunter scrapes the entire playlist and loads it into your queue.
 
-### 🌟 Overview
-Most modern players are either too heavy, hide synced lyrics behind a subscription, or completely fail when a song isn't in their database. This player focuses on:
-* **Privacy & Speed**: It plays your local `.mp3` files without tracking your data.
-* **Smart Syncing**: Fetches perfect lyrics from the LRCLIB database, and uses Local AI to automatically sync plain text when timed lyrics don't exist.
-* **Immersive Vibe**: A dedicated full-screen mode that blurs your album art for a cinematic background, complete with auto-fading UI for a distraction-free experience.
+🔀 Dual-Queue Architecture: Manage your music with two independent queues. Keep your everyday Main Queue safe while loading massive albums into the Playlist Queue, toggling between them seamlessly.
 
----
+🎤 Immersive Lyrics Engine: * Automatically fetches and syncs .lrc files.
 
-### 🚀 How to Run
+AI Auto-Stretch: Automatically interpolates and stretches plain-text lyrics to match a song's exact duration if timed lyrics aren't found.
 
-#### **Option 1: Standalone Installer (Recommended)**
-If you just want to listen to music:
-1.  Navigate to the **`dist/`** (or GitHub Releases) folder.
-2.  Download **`music-player Setup 1.1.0.exe`**.
-3.  Run the installer to add the player to your Start Menu and Desktop.
+Manual Override: Alternative lyrics menu to swap out bad database pulls, or block incorrect lyrics entirely.
 
-#### **Option 2: Run from Source (For Developers)**
-To modify the code or run via terminal:
-1.  **Clone the repository**:
-    ```powershell
-    git clone https://github.com/mahitmass/music_with_LYRICS.git
-    cd music_with_LYRICS
-    ```
-2.  **Install Dependencies**: Recreates the `node_modules` folder.
-    ```powershell
-    npm install
-    ```
-3.  **Launch the App**:
-    ```powershell
-    npm start
-    ```
+🖱️ Pro Context Menu: A custom-built right-click menu natively injected into the DOM. Instantly Play Next, Add to Bottom, or save tracks to your Local Favorites without interrupting the music.
 
----
+🎮 Interactive Live Tutorial: A 20-step, fully interactive onboarding engine that safely simulates app features (like dropping the volume to 5% and auto-searching) to show new users the ropes.
 
-### ✨ AI & Smart Sync Features
-* **Background AI Queue**: Queue up multiple plain-text songs for AI synchronization. The app processes them sequentially in the background without freezing your music.
-* **"Rubber Band" Interpolation**: Custom AI logic that anchors known words and mathematically stretches the timestamps in between, making it impossible for fast songs (like rap or remixes) to drift out of sync.
-* **Smart Duration Sorting**: When searching for alternative lyrics, the app automatically compares the length of your local audio file to the database and pushes the most accurate match to the absolute top.
-* **Fallback Generator**: If the database is completely empty, you can force the AI to transcribe and time the lyrics entirely from scratch directly from the Retry menu.
+🛠️ Tech Stack
+Framework: Electron.js
 
----
+Backend/Logic: Node.js, custom Vanilla JavaScript engines
 
-### 🎧 Key Player Features
-* **Cinematic Idle Fade**: If the app is left running in the background for 10 minutes, the player controls gracefully fade out to provide a gorgeous, distraction-free "Screenshot Mode."
-* **Precision Auto-Scroller**: The queue automatically and silently snaps the currently playing song to the dead center of your screen, whether you are in the sidebar or Immersive mode.
-* **Advanced Manual Sync**: Dial in your lyric timing perfectly. Hold down the `+` / `-` buttons to scroll the time, or click the number to manually type an exact offset (e.g., `-2.5s`).
-* **Smart Drag & Drop**: Drag files from Windows Explorer directly into the queue to insert them at specific positions.
-* **Interactive Lyrics**: Click any line in the lyrics view to jump the song instantly to that timestamp.
-* **Persistent Memory**: Remembers your queue, your last played track, and your custom sync offsets for every individual song, even after closing the app.
+Audio Handling: HTML5 Audio API with custom buffering & failsafes
 
----
+APIs: JioSaavn API (Primary Search/Stream), Piped/Cobalt (Failovers), LRCLIB (Lyrics)
 
-### 🛠 Technical Stack
-* **Framework:** Electron.js (Node.js & Chromium)
-* **Frontend:** Vanilla JavaScript, HTML5, CSS3
-* **Audio:** HTML5 Audio API & Web Audio API (for AI buffer decoding)
-* **Metadata:** `music-metadata` (Extracts embedded Album Art & Tags)
-* **Lyrics API:** LRCLIB (Open-source lyrics database)
+🚀 Installation & Setup
+Clone the repository:
+
+Bash
+git clone https://github.com/YOUR-USERNAME/mass-media-player.git
+Navigate to the directory:
+
+Bash
+cd mass-media-player
+Install dependencies:
+
+Bash
+npm install
+Start the application:
+
+Bash
+npm start
+⌨️ Global Shortcuts
+The player is designed to be controlled without taking your hands off the keyboard:
+
+Space - Play / Pause
+
+Arrow Up / Down - Volume Control (5% increments)
+
+Arrow Left / Right - Seek (10s jumps)
+
+S - Focus Global Search
+
+M - Toggle Immersive Lyrics View
+
+Z - Shuffle Remaining Queue
+
+T - Toggle Lyrics Engine (Saves CPU)
+
+Esc - Clear search and close menus
+
+🤝 Contributing
+Pull requests are welcome! If you find a bug or want to suggest a new feature, feel free to open an issue.
