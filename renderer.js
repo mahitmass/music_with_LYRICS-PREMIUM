@@ -1,3 +1,5 @@
+const ctxMenu = document.getElementById('custom-context-menu');
+let ctxTarget = null;
 let toastTimeout;
 function showToast(msg) {
     const toast = document.getElementById('toast');
@@ -36,47 +38,112 @@ ipcRenderer.on('open-external-file', (event, filePath) => {
     draw(); saveState(); play(queue.length - 1);
 });
 
-window.onload = () => {
-    const btn = document.getElementById('btn-toggle-lyrics');
+window.addEventListener('load', () => {
+        const btn = document.getElementById('btn-toggle-lyrics');
+    document.body.classList.add('home-mode');
+    
+    // Start clean with current lyric settings
     if (btn) {
-    btn.style.color = lyricsEnabled ? 'var(--accent)' : 'var(--dim)';
-    btn.innerText = lyricsEnabled ? 'subtitles' : 'subtitles_off';
+        btn.style.color = lyricsEnabled ? 'var(--accent)' : 'var(--dim)';
+        btn.innerText = lyricsEnabled ? 'subtitles' : 'subtitles_off';
     }
+    
+    // Restore volume
     volSlider.value = localStorage.getItem('playerVol') || 1;
     audio.volume = volSlider.value;
+
+    // ==========================================
+    // NEW: RECOVER DUAL-QUEUE MEMORY
+    // ==========================================
+    const savedMode = localStorage.getItem('activeQMode');
+    if (savedMode) {
+        activeQMode = savedMode;
+        // Parse saved data or default to empty arrays/0 if not found
+        mainQueue = JSON.parse(localStorage.getItem('mainQueue') || '[]');
+        mainIdx = parseInt(localStorage.getItem('mainIdx')) || 0;
+        plQueue = JSON.parse(localStorage.getItem('plQueue') || '[]');
+        plIdx = parseInt(localStorage.getItem('plIdx')) || 0;
+        
+        // Restore UI Buttons so the correct one stays "lit"
+        const btnMain = document.getElementById('btn-q-main');
+        const btnPl = document.getElementById('btn-q-pl');
+        if (btnMain) btnMain.classList.toggle('active', activeQMode === 'main');
+        if (btnPl) btnPl.classList.toggle('active', activeQMode === 'playlist');
+    }
+
+    // Recover the active queue to display in the sidebar/immersive view
     const savedQueue = localStorage.getItem('playerQueue');
     if(savedQueue) {
-    queue = JSON.parse(savedQueue);
-    curIdx = parseInt(localStorage.getItem('playerIdx')) || 0;
-    draw();
-    if(queue.length > 0) {
-        const s = queue[curIdx];
-        document.getElementById('cur-t').innerText = s.t;
-        document.getElementById('cur-a').innerText = s.a;
-        currentSongId = s.a + " - " + s.t;
-        updateToolIcons();
-        if(s.isOnline) {
-        audio.src = s.p;
-        document.getElementById('album-cover').src = s.cover;
-        document.getElementById('album-cover').style.display = "block";
-        document.getElementById('bg-blur').style.backgroundImage = `url(${s.cover})`;
-        } else {
-        audio.src = `file://${s.p.replace(/\\/g, '/')}`; 
-        extractAlbumArt(s);
+        queue = JSON.parse(savedQueue);
+        curIdx = parseInt(localStorage.getItem('playerIdx')) || 0;
+        draw();
+        
+        if(queue.length > 0) {
+            const s = queue[curIdx];
+            document.getElementById('cur-t').innerText = s.t;
+            document.getElementById('cur-a').innerText = s.a;
+            
+            // Set tracking ID for sync/lyrics
+            currentSongId = s.ytId || (s.a + " - " + s.t);
+            updateToolIcons();
+
+            if(s.isOnline) {
+                audio.src = s.p;
+                if (s.cover) {
+                    document.getElementById('album-cover').src = s.cover;
+                    document.getElementById('album-cover').style.display = "block";
+                    document.getElementById('bg-blur').style.backgroundImage = `url(${s.cover})`;
+                } else {
+                    fallbackArt(s.t || 'Unknown');
+                }
+            } else {
+                audio.src = encodeURI(`file://${s.p.replace(/\\/g, '/')}`);
+                extractAlbumArt(s);
+            }
+            getLyrics(s);
+            scrollToCurrentSong();
         }
-        getLyrics(s);
-        scrollToCurrentSong();
     }
+    
+    // Pre-sync your sidebar playlist names
+    if (typeof preloadSidebarPlaylistNames === 'function') {
+        preloadSidebarPlaylistNames();
     }
-};
+    
+    // Initialize recommendation engine
+    if (typeof loadHomepage === 'function') {
+        loadHomepage();
+    }
+});
 
 // --- GLOBAL KEYBOARD SHORTCUTS ---
 document.addEventListener('keydown', (e) => {
-    // IGNORING INPUTS
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return; 
+    // THE FIX: Ignore inputs EXCEPT when the user presses Escape!
+    if ((e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') && e.key.toLowerCase() !== 'escape') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     switch(e.key.toLowerCase()) {
+        case 'escape': 
+    e.preventDefault();
+    // Blur whatever is focused
+    if (document.activeElement) document.activeElement.blur();
+    
+    // Clear AND hide sidebar search
+    const sidebarInput = document.getElementById('sidebar-search');
+    const sidebarResults = document.getElementById('sidebar-search-results');
+    if (sidebarInput) sidebarInput.value = '';
+    if (sidebarResults) { sidebarResults.style.display = 'none'; sidebarResults.innerHTML = ''; }
+    
+    // Clear AND hide immersive search
+    const immInput = document.getElementById('imm-search');
+    const immDrop = document.getElementById('imm-search-results');
+    if (immInput) immInput.value = '';
+    if (immDrop) { immDrop.style.display = 'none'; immDrop.innerHTML = ''; }
+    
+    // Restore the normal queue after clearing search
+    draw();
+    break;
+            
         case ' ': // Spacebar - Play/Pause
             e.preventDefault(); 
             togglePlay();
@@ -112,10 +179,14 @@ document.addEventListener('keydown', (e) => {
             if (volSlider) volSlider.value = audio.volume; 
             break;
 
-        case 'm': // M - Toggle Immersive Mode
+        case 'm': // M - Switch between Home and Player safely
             e.preventDefault();
-            document.body.classList.toggle('immersive');
-            scrollToCurrentSong();
+            const playerView = document.getElementById('view-player');
+            if (playerView && playerView.classList.contains('active')) {
+                switchToHomeView(); // <--- Changed from switchView('home')
+            } else {
+                if (queue.length > 0) switchToPlayerView(); // <--- Changed from switchView('player')
+            }
             break;
 
         case 'r': // R - Retry / Search Lyrics
@@ -152,8 +223,24 @@ document.addEventListener('keydown', (e) => {
 volSlider.oninput = () => { audio.volume = volSlider.value; localStorage.setItem('playerVol', volSlider.value); };
 
 function saveState() {
+    // 1. Save the current active queue and index
     localStorage.setItem('playerQueue', JSON.stringify(queue));
     localStorage.setItem('playerIdx', curIdx);
+    
+    // 2. NEW: Save the Dual-Queue architecture!
+    if (typeof activeQMode !== 'undefined') {
+        localStorage.setItem('activeQMode', activeQMode);
+        localStorage.setItem('mainQueue', JSON.stringify(mainQueue));
+        localStorage.setItem('mainIdx', mainIdx);
+        localStorage.setItem('plQueue', JSON.stringify(plQueue));
+        localStorage.setItem('plIdx', plIdx);
+    }
+}   
+
+function toggleClearMenu() {
+    const menu = document.getElementById('clear-menu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
 }
 
 function toggleImmersive() { document.body.classList.toggle('immersive'); scrollToCurrentSong();}
@@ -169,26 +256,33 @@ function clearQueue(type) {
 let searchTimeout;
 function filterQueue(query, targetId, isImmersive = false) {
     const target = document.getElementById(targetId);
-    if(!query) { 
-    if(isImmersive) target.style.display = 'none';
-    else draw(); 
-    return; 
+    if (!target) return;
+
+    // THE FIX: If the search bar is empty, hide results and clear UI instantly
+    if (!query || query.trim() === '') {
+        target.style.display = 'none';
+        target.innerHTML = '';
+        // If you were filtering the main queue-list, restore the normal list
+        if (targetId === 'queue-list') draw(); 
+        return;
     }
-    
+
+    target.style.display = 'block'; 
     const q = query.toLowerCase();
     
     // 1. Build Local UI
     let html = `<div style="padding:10px 10px 5px; color:var(--accent); font-size:0.75rem; font-weight:bold; letter-spacing:1px; text-transform:uppercase;">Local Queue</div>`;
     let localFound = false;
     queue.forEach((s, i) => {
-    if(s.t.toLowerCase().includes(q) || s.a.toLowerCase().includes(q)) {
-        localFound = true;
-        let icon = s.isOnline ? "cloud" : "audiotrack";
-        html += `
-        <div class="item" onclick="playNextSearch(${i})" style="cursor:pointer;">
-            <div class="item-left"><span class="material-icons-round" style="font-size:16px;">${icon}</span> ${s.t} - <small>${s.a}</small></div>
-        </div>`;
-    }
+        if(s.t.toLowerCase().includes(q) || s.a.toLowerCase().includes(q)) {
+            localFound = true;
+            let icon = s.isOnline ? "cloud" : "audiotrack";
+            // We ensure the click function clears the UI
+            html += `
+            <div class="item" onclick="playNextSearch(${i}, '${targetId}')" style="cursor:pointer;">
+                <div class="item-left"><span class="material-icons-round" style="font-size:16px;">${icon}</span> ${s.t} - <small>${s.a}</small></div>
+            </div>`;
+        }
     });
     if (!localFound) html += `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No local match</div>`;
     
@@ -198,80 +292,99 @@ function filterQueue(query, targetId, isImmersive = false) {
             </div></div>`;
 
     target.innerHTML = html;
-    if(isImmersive) target.style.display = 'block';
 
-    // 3. Trigger Global Fetch (Debounced to prevent spamming the API)
+    // 3. Trigger Global Fetch (Debounced to 800ms)
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => fetchOnlineSearch(query, `${targetId}-online`), 800);
 }
 
-async function fetchOnlineSearch(query, containerId) {
-    const container = document.getElementById(containerId);
-    if(!container) return;
-
+// ==========================================
+// --- GLOBAL ONLINE SEARCH (JIOSAAVN API) ---
+// ==========================================
+async function fetchOnlineSearch(query, targetId) {
+    const container = document.getElementById(targetId);
+    if (!container) return;
+    
     try {
-    // Upgraded to the ultimate, stable API with a 40-song limit
-    let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=40`);
-    
-    if (!res.ok) throw new Error("API Blocked");
-    
-    let json = await res.json();
-    // The new API puts the songs inside data.results
-    let results = (json.data && json.data.results) ? json.data.results : [];
-
-    if (results.length > 0) {
-        let html = "";
+        // THE FIX: Direct fetch to JioSaavn API instead of YT Music
+        let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=15`);
+        let json = await res.json();
+        let results = (json.data && json.data.results) ? json.data.results : [];
         
-        results.forEach(song => {
-        let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-        
-        // Safely grab the main artist
-        let artist = "Unknown";
-        if (song.artists && song.artists.primary && song.artists.primary.length > 0) {
-            artist = song.artists.primary[0].name.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-        }
-
-        // Grab the highest resolution album cover
-        let cover = "";
-        if (song.image && song.image.length > 0) {
-            cover = song.image[song.image.length - 1].url;
+        if (results.length === 0) {
+            container.innerHTML = `<div style="padding:15px; color:var(--dim); text-align:center;">No results found</div>`;
+            return;
         }
         
-        // Grab the highest quality 320kbps audio stream
-        let downloadLink = "";
-        if (song.downloadUrl && song.downloadUrl.length > 0) {
-            downloadLink = song.downloadUrl[song.downloadUrl.length - 1].url;
-        }
+        let html = '';
+        results.forEach((song) => {
+            let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+            let artist = song.artists?.primary?.[0]?.name.replace(/&quot;/g, '"').replace(/&amp;/g, '&') || "Unknown";
+            let cover = song.image?.length > 0 ? song.image[song.image.length - 1].url : "";
+            let dl = song.downloadUrl?.length > 0 ? song.downloadUrl[song.downloadUrl.length - 1].url : "";
 
-        if (downloadLink) {
-            let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            let safeC = cover ? cover.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
-            let safeDL = downloadLink.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-            html += `
-            <div class="item" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}')" style="cursor:pointer; border-left: 3px solid #4cc2ff; align-items: center; padding: 8px 10px;">
-            <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
-            <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
-                <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                <span class="material-icons-round" style="font-size:14px; color:var(--dim); vertical-align:middle; margin-right:4px;">cloud_download</span>${title}
-                </div>
-                <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${artist}
-                </div>
-            </div>
-            </div>`;
-        }
+            // Only add tracks that have a direct playable audio link
+            if (dl) {
+                // Build the perfect song object that skips the audio resolver
+                let sObj = {
+                    t: title,
+                    a: artist,
+                    cover: cover,
+                    p: dl, // The direct audio link
+                    isOnline: true,
+                    needsAudioStream: false // THE MAGIC FLAG: Plays instantly!
+                };
+                
+                // Encode the song so we can safely inject it into the HTML click event
+                let safeSong = encodeURIComponent(JSON.stringify(sObj));
+                let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                
+                html += `
+                <div class="item" onclick="addOnlineSong('${safeSong}')" style="cursor:pointer; display:flex; align-items:center; padding:10px; border-bottom:1px solid #333;">
+                    <img src="${cover}" style="width:40px; height:40px; border-radius:4px; margin-right:12px; object-fit:cover;">
+                    <div class="item-left" style="overflow: hidden;">
+                        <div style="font-weight:bold; font-size:0.9rem; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeT}</div>
+                        <small style="color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block;">${safeA}</small>
+                    </div>
+                    <span class="material-icons-round" style="margin-left:auto; color:var(--accent); font-size:18px;">add_circle_outline</span>
+                </div>`;
+            }
         });
         
-        container.innerHTML = html || `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No playable streams found.</div>`;
-    } else {
-        container.innerHTML = `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No global results found.</div>`;
-    }
+        if (html === '') {
+             container.innerHTML = `<div style="padding:15px; color:var(--dim); text-align:center;">No playable results found</div>`;
+        } else {
+             container.innerHTML = html;
+        }
     } catch (e) {
-    container.innerHTML = `<div style="padding:10px; color:#ff4c4c; text-align:center; font-size: 0.85rem;">Online Search Offline (${e.message}). Try again.</div>`;
-    console.error("Search Error for query:", query, e);
+        container.innerHTML = `<div style="padding:15px; color:red; text-align:center;">Search failed</div>`;
     }
+}
+
+// Helper function to add the clicked YT Music song to your queue
+// Helper function to add the clicked YT Music song to your queue
+function addOnlineSong(encodedSong) {
+    const s = JSON.parse(decodeURIComponent(encodedSong));
+    
+    // 1. THE FIX: Insert right after the current song instead of at the bottom!
+    const insertPos = queue.length === 0 ? 0 : curIdx + 1;
+    queue.splice(insertPos, 0, s);
+    
+    // 2. Close the search dropdowns
+    const sideSearch = document.getElementById('sidebar-search-results');
+    const immSearch = document.getElementById('imm-search-results');
+    if (sideSearch) sideSearch.style.display = 'none';
+    if (immSearch) immSearch.style.display = 'none';
+    
+    // 3. Clear input text
+    if (document.getElementById('sidebar-search')) document.getElementById('sidebar-search').value = '';
+    if (document.getElementById('imm-search')) document.getElementById('imm-search').value = '';
+    
+    // 4. Save and Play immediately
+    draw();
+    saveState();
+    play(insertPos);
 }
 
 function addNextOnline(title, artist, cover, url) {
@@ -279,9 +392,12 @@ function addNextOnline(title, artist, cover, url) {
     const insertPos = queue.length === 0 ? 0 : curIdx + 1;
     queue.splice(insertPos, 0, newSong);
     
-    document.getElementById('sidebar-search').value = '';
-    document.getElementById('imm-search').value = '';
-    document.getElementById('imm-search-results').style.display = 'none';
+    const sideSearch = document.getElementById('sidebar-search');
+    const immSearch = document.getElementById('imm-search');
+    const immResults = document.getElementById('imm-search-results');
+    if (sideSearch) sideSearch.value = '';
+    if (immSearch) immSearch.value = '';
+    if (immResults) immResults.style.display = 'none';
 
     draw(); saveState();
     
@@ -294,53 +410,39 @@ function addNextOnline(title, artist, cover, url) {
     if(hList && hList.children[insertPos]) hList.children[insertPos].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
 
-    if(document.body.classList.contains('immersive')) {
-    const hq = document.getElementById('hover-q');
-    hq.classList.add('force-open');
-    setTimeout(() => hq.classList.remove('force-open'), 2000);
-    }
 }
 
-function playNextSearch(origIdx) {
-    if(origIdx === curIdx) return;
-    const item = queue.splice(origIdx, 1)[0];
-    if(origIdx < curIdx) curIdx--; 
-    queue.splice(curIdx + 1, 0, item);
-    draw(); saveState();
+function playNextSearch(index, targetId) {
+    // 1. UI Cleanup - Clear inputs and hide results
+    const searchInputs = ['sidebar-search', 'imm-search'];
+    searchInputs.forEach(id => { 
+        const el = document.getElementById(id); 
+        if(el) el.value = ''; 
+    });
     
-    document.getElementById('sidebar-search').value = '';
-    document.getElementById('imm-search').value = '';
-    document.getElementById('imm-search-results').style.display = 'none';
-    draw(); 
+    const resultsDivs = ['sidebar-search-results', 'imm-search-results'];
+    resultsDivs.forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.style.display = 'none';
+    });
 
-    setTimeout(() => {
-    const qList = document.getElementById('queue-list');
-    const hList = document.getElementById('hover-queue-list');
-    const newPos = curIdx + 1;
-    if(qList.children[newPos]) qList.children[newPos].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    if(hList.children[newPos]) hList.children[newPos].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+    // 2. THE FIX: Move the song from its old position to curIdx + 1
+    if (index === curIdx) return; // It's already playing
 
-    if(document.body.classList.contains('immersive')) {
-    const hq = document.getElementById('hover-q');
-    hq.classList.add('force-open');
-    setTimeout(() => hq.classList.remove('force-open'), 2000);
-    }
+    const [selectedSong] = queue.splice(index, 1); // Remove from old spot
+    if (index < curIdx) curIdx--; // Adjust current index if we removed a song from above it
+
+    queue.splice(curIdx + 1, 0, selectedSong); // Insert right after current song
+
+    // 3. Play the song we just moved
+    play(curIdx + 1);
+
+    draw();
+    saveState();
 }
 
 // --- TRACKPAD SWIPE & KEYBOARD CONTROLS ---
 let swipeCooldown = false;
-window.addEventListener('wheel', (e) => {
-    if(swipeCooldown) return;
-    
-    // Only trigger if horizontal swipe is strong AND larger than any accidental vertical movement
-    if (Math.abs(e.deltaX) > 50 && Math.abs(e.deltaX) > Math.abs(e.deltaY)) { 
-    swipeCooldown = true;
-    if (e.deltaX > 0) playNext();
-    else playPrev();
-    setTimeout(() => swipeCooldown = false, 800); 
-    }
-}, { passive: true });
 
 window.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
@@ -544,7 +646,6 @@ async function triggerRetryUI() {
     const q = `${encodeURIComponent((s.a || '') + ' ' + getCleanTitle(s))}`;
     const headers = { 'User-Agent': 'music-player-mass/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
     
-    // The beautiful AI Re-Generate button we will inject at the bottom
     const aiRetryButtonHTML = `
         <div class="retry-item" onclick="exitRetryUI(); triggerManualAIGeneration();" style="text-align:center; border: 1px dashed rgba(76,194,255,0.4); background: rgba(76,194,255,0.05); margin-top: 10px;">
             <div style="color:var(--accent); font-size:1.1rem; font-weight:700; display:flex; align-items:center; justify-content:center; gap:10px;">
@@ -555,18 +656,22 @@ async function triggerRetryUI() {
     `;
 
     try {
-        let res = await fetch(`https://lrclib.net/api/search?q=${q}`, { headers });
+        // Include duration here as well to filter the retry list correctly
+        const dur = audio.duration > 0 ? `&duration=${Math.round(audio.duration)}` : '';
+        let res = await fetch(`https://lrclib.net/api/search?q=${q}${dur}`, { headers });
         if (!res.ok) throw new Error("Database offline");
         
         let data = await res.json();
         if (!data) data = [];
         
+        // THE FIX: Adjust slicing to guarantee spots for plain text lyrics
         let timed = data.filter(d => d.syncedLyrics);
         let plain = data.filter(d => !d.syncedLyrics && d.plainLyrics);
-        currentRetryData = [...timed.slice(0, 3), ...plain.slice(0, 6 - Math.min(3, timed.length))];
+        
+        // Show up to 4 timed and at least 2 plain text if they exist
+        currentRetryData = [...timed.slice(0, 4), ...plain.slice(0, 2)];
 
         if(currentRetryData.length === 0) {
-            // If database is empty, show the AI button alone!
             container.innerHTML = `
                 <p style="padding:30px; color:var(--dim); text-align:center">No alternative lyrics found in database.</p>
                 ${aiRetryButtonHTML}
@@ -606,7 +711,6 @@ async function triggerRetryUI() {
             </div>`;
         });
         
-        // Append the AI option at the very bottom of the results
         container.innerHTML = html + aiRetryButtonHTML;
 
     } catch(e) {
@@ -761,38 +865,42 @@ document.getElementById('fls-next').onchange = (e) => {
     e.target.value = ''; 
 };
 
-document.querySelector('.sidebar').addEventListener('dragover', e => e.preventDefault());
-document.querySelector('.sidebar').addEventListener('drop', e => {
-    e.preventDefault(); e.stopPropagation();
-    if (draggedIdx === null && e.dataTransfer.files.length > 0) insertFilesAt(e.dataTransfer.files, queue.length);
-});
+const sidebarEl = document.querySelector('.yt-sidebar');
+if (sidebarEl) {
+    sidebarEl.addEventListener('dragover', e => e.preventDefault());
+    sidebarEl.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation();
+        if (draggedIdx === null && e.dataTransfer.files.length > 0) insertFilesAt(e.dataTransfer.files, queue.length);
+    });
+}
 
-// --- AUTO-SCROLL QUEUE (SILENT BACKGROUND SCROLL) ---
+// --- AUTO-SCROLL QUEUE (HYBRID MATH FIX) ---
 function scrollToCurrentSong() {
     if(queue.length === 0) return;
     
     setTimeout(() => {
-        const isImmersive = document.body.classList.contains('immersive');
+        const qList = document.getElementById('queue-list');
+        const hList = document.getElementById('hover-queue-list');
         
-        // ONLY scroll the list that is currently visible to prevent layout glitches!
-        if (isImmersive) {
-            const hList = document.getElementById('hover-queue-list');
-            if(hList && hList.children[curIdx]) {
-                const item = hList.children[curIdx];
-                hList.scrollTo({ top: item.offsetTop - (hList.clientHeight / 2) + (item.clientHeight / 2), behavior: 'smooth' });
-            }
-        } else {
-            const qList = document.getElementById('queue-list');
-            if(qList && qList.children[curIdx]) {
-                const item = qList.children[curIdx];
-                qList.scrollTo({ top: item.offsetTop - (qList.clientHeight / 2) + (item.clientHeight / 2), behavior: 'smooth' });
-            }
+        // 1. Let the browser handle the main queue naturally
+        if (qList && qList.children[curIdx]) {
+            qList.children[curIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
-    }, 100); 
+        
+        // 2. Use pure math for the side queue so the browser doesn't slide it on-screen!
+        if (hList && hList.children[curIdx]) {
+            const item = hList.children[curIdx];
+            hList.scrollTo({
+                top: item.offsetTop - (hList.clientHeight / 2) + (item.clientHeight / 2),
+                behavior: 'smooth'
+            });
+        }
+    }, 150);
 }
 
 function draw() {
-    const searchTerm = document.getElementById('sidebar-search').value;
+    const sideSearch = document.getElementById('sidebar-search');
+    const searchTerm = sideSearch ? sideSearch.value : '';
     if(searchTerm) return; 
     
     const qList = document.getElementById('queue-list');
@@ -818,36 +926,135 @@ function draw() {
     if(hList) hList.scrollTop = hScroll;
 }
 
-function play(i) {
+// MUST have the word 'async' here!
+let playSessionId = 0; // Prevents the "Glitchy Swipe" Race Condition
+
+async function play(i) {
     if(i < 0 || i >= queue.length) return;
+    
+    playSessionId++; // Generate a new ticket for this specific song request
+    lastPreloadedIdx = -1;
+    const mySessionId = playSessionId; 
+
+    switchToPlayerView();
     curIdx = i; const s = queue[i];
     isUserScrolling = false;
     document.getElementById('cur-t').innerText = s.t;
     document.getElementById('cur-a').innerText = s.a;
     
-    currentSongId = s.id || s.p;
-    updateToolIcons();
+    currentSongId = s.ytId || (s.a + " - " + s.t);
+    if (typeof updateToolIcons === 'function') updateToolIcons();
     draw(); saveState();
     
-    // TRIGGER THE SCROLL EXACTLY HERE
-    scrollToCurrentSong();
+    if (typeof scrollToCurrentSong === 'function') scrollToCurrentSong();
     
-    // Online routing vs Local routing
+    const audio = document.getElementById('player');
+
     if(s.isOnline) {
-    audio.src = s.p;
-    audio.play().catch(e => console.error(e));
-    document.getElementById('album-cover').src = s.cover;
-    document.getElementById('album-cover').style.display = "block";
-    document.getElementById('bg-blur').style.backgroundImage = `url(${s.cover})`;
+        if (s.cover) {
+            document.getElementById('album-cover').src = s.cover;
+            document.getElementById('album-cover').style.display = "block";
+            document.getElementById('bg-blur').style.backgroundImage = `url(${s.cover})`;
+        } else {
+            if (typeof fallbackArt === 'function') fallbackArt(s.t || 'Unknown');
+        }
+
+        // Only fetch if we DON'T have a cached URL
+        if (s.needsAudioStream || !s.p || s.p.trim() === "") {
+            showToast(`Resolving audio for: ${s.t}...`);
+            let foundStream = false;
+
+            // 1. COBALT API (Fastest & Most Reliable)
+            if (s.ytId && !foundStream) {
+                try {
+                    let res = await fetch("https://co.wuk.sh/api/json", {
+                        method: "POST",
+                        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+                        body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${s.ytId}`, isAudioOnly: true }),
+                        signal: AbortSignal.timeout(6000)
+                    });
+                    if (res.ok) {
+                        let json = await res.json();
+                        if (json && json.url) { s.p = json.url; foundStream = true; }
+                    }
+                } catch(e) {}
+            }
+
+            // 2. PIPED API FAILOVER (Mirrors)
+            if (!foundStream && s.ytId) {
+                const pipedServers = ["https://pipedapi.kavin.rocks", "https://pipedapi.smnz.de", "https://api.piped.projectsegfau.lt"];
+                for (const server of pipedServers) {
+                    try {
+                        let res = await fetch(`${server}/streams/${s.ytId}`, { signal: AbortSignal.timeout(4000) });
+                        if (res.ok) {
+                            let json = await res.json();
+                            let bestAudio = json.audioStreams?.find(st => st.mimeType?.includes("mp4") || st.mimeType?.includes("webm"));
+                            if (bestAudio?.url) { s.p = bestAudio.url; foundStream = true; break; }
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            // 3. JIOSAAVN FALLBACK 
+            if (!foundStream) {
+                const saavnApis = [
+                    `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(s.a + " " + s.t)}&limit=1`,
+                    `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(s.t)}&limit=1` 
+                ];
+                for (const url of saavnApis) {
+                    try {
+                        let res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+                        let json = await res.json();
+                        let results = json.data?.results || [];
+                        if (results.length > 0 && results[0].downloadUrl?.length > 0) {
+                            s.p = results[0].downloadUrl[results[0].downloadUrl.length - 1].url;
+                            foundStream = true; break;
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            // RACE CONDITION CHECK: Did the user swipe to a new song while we were downloading?
+            // If yes, abort this function entirely so it doesn't hijack the player!
+            if (mySessionId !== playSessionId) return; 
+
+            // 4. ANTI-CRASH CHECK
+            if (!foundStream || !s.p || s.p.trim() === "" || s.p.includes("index.html")) {
+                showToast(`Audio unavailable. Skipping...`);
+                audio.removeAttribute('src'); 
+                setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
+                return; 
+            }
+            
+            // SAVE IT! So next time you click it, it loads instantly!
+            s.needsAudioStream = false;
+            saveState();
+        }
+
+        // RACE CONDITION CHECK 2: Just to be safe before hitting play
+        if (mySessionId !== playSessionId) return;
+
+        // 5. ACTUALLY PLAY THE SONG 
+        audio.src = s.p;
+        audio.load();
+        audio.play().catch(e => {
+            console.error("Playback error:", e);
+            audio.removeAttribute('src');
+            setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
+        });
+
     } else {
-    audio.src = `file://${s.p.replace(/\\/g, '/')}`; 
-    audio.play().catch(e => console.error(e));
-    extractAlbumArt(s); 
+        if (s.p && s.p.trim() !== "") {
+            audio.src = encodeURI(`file://${s.p.replace(/\\/g, '/')}`);
+            audio.load();
+            audio.play().catch(e => console.error(e));
+            if (typeof extractAlbumArt === 'function') extractAlbumArt(s); 
+        }
     }
     
     if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
-    getLyrics(s);
-}
+    if (typeof getLyrics === 'function') getLyrics(s);
+}  
 
 function extractAlbumArt(song) {
     const coverImg = document.getElementById('album-cover');
@@ -872,7 +1079,9 @@ function fallbackArt(title) {
     let hash = 0;
     for (let i = 0; i < title.length; i++) hash = title.charCodeAt(i) + ((hash << 5) - hash);
     const c1 = `hsl(${hash % 360}, 70%, 50%)`, c2 = `hsl(${(hash + 40) % 360}, 80%, 30%)`;
-    document.getElementById('album-cover').style.display = "none";
+    const cover = document.getElementById('album-cover');
+    cover.style.display = "none";
+    cover.removeAttribute('src');
     document.getElementById('bg-blur').style.backgroundImage = `linear-gradient(45deg, ${c1}, ${c2})`;
 }
 
@@ -1153,7 +1362,7 @@ async function generateAILyrics(song) {
     });
 }
 
-// --- FETCH LYRICS ---
+    // --- FETCH LYRICS ---
 async function getLyrics(s) {
   if (!lyricsEnabled) {
     lyrics = [];
@@ -1196,7 +1405,10 @@ async function getLyrics(s) {
     lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">Searching the database...</p>';
     
     const headers = { 'User-Agent': 'ProMediaPlayer/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
-    let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(s.a || '')}`, { headers });
+    
+    // THE FIX: Include duration in the search query to handle extended/radio edits correctly
+    const durationParam = audio.duration > 0 ? `&duration=${Math.round(audio.duration)}` : '';
+    let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(s.a || '')}${durationParam}`, { headers });
     
     if (res.status === 429 || res.status === 403) {
       lContent.innerHTML = '<p class="lyric-line" style="opacity:1; color:#ff4c4c;">API Cooldown. Waiting...</p>'; return;
@@ -1206,22 +1418,21 @@ async function getLyrics(s) {
 
     let data = await res.json();
     if(!data || (!data[0]?.syncedLyrics && !data[0]?.plainLyrics)) {
-        res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent((s.a || '') + ' ' + cleanTitle)}`, { headers });
+        res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent((s.a || '') + ' ' + cleanTitle)}${durationParam}`, { headers });
         if(res.ok) data = await res.json();
     }
     
     // --- SMART DURATION SORTING ---
-    // If the audio is loaded, sort the database results so the closest track length is #1
+    // Double-check sorting locally to ensure the best match is #1
     if (data && Array.isArray(data) && audio.duration > 0) {
         const targetDur = audio.duration;
         data.sort((a, b) => {
             const diffA = a.duration ? Math.abs(a.duration - targetDur) : 9999;
             const diffB = b.duration ? Math.abs(b.duration - targetDur) : 9999;
-            return diffA - diffB; // Smallest difference moves to the top
+            return diffA - diffB; 
         });
     }
     
-    // Grab Synced first. If no synced, grab Plain.
     let finalLyrics = null;
     if (data && data[0]) {
         finalLyrics = data[0].syncedLyrics || data[0].plainLyrics || null;
@@ -1242,7 +1453,6 @@ async function getLyrics(s) {
     }
     
     if(finalLyrics) {
-      // INTERNET SUCCESS
       if (!s.isOnline) {
         if(!fs.existsSync(lDir)) fs.mkdirSync(lDir);
         fs.writeFileSync(lPath, finalLyrics);
@@ -1252,7 +1462,6 @@ async function getLyrics(s) {
       show(finalLyrics); 
       
     } else { 
-      // INTERNET FAILED -> CHECK QUEUE OR SHOW GENERATE BUTTON
       const isSongInAIQueue = currentAITask?.p === s.p || aiTaskQueue.some(t => t.song.p === s.p);
 
       if (isSongInAIQueue) {
@@ -1327,6 +1536,29 @@ function show(lrc) {
 
 audio.addEventListener('play', () => document.getElementById('p-icon').innerText = 'pause');
 audio.addEventListener('pause', () => document.getElementById('p-icon').innerText = 'play_arrow');
+audio.addEventListener('error', () => {
+    console.error('Audio playback error', audio.error, audio.src);
+    
+    // 1. Stop the infinite index.html crash loop!
+    if (!audio.src || audio.src.includes("index.html") || audio.src === window.location.href) {
+        return; 
+    }
+
+    // 2. Auto-Heal Expired YouTube Links!
+    const s = queue[curIdx];
+    if (s && s.isOnline && s.ytId && s.p && !audio.src.includes("saavn")) {
+        console.log("YouTube link likely expired. Re-fetching fresh audio...");
+        s.p = ""; // Clear the dead URL
+        s.needsAudioStream = true; // Force a fresh fetch
+        saveState();
+        play(curIdx); // Re-trigger play seamlessly
+        return;
+    }
+    
+    // 3. If it's truly broken, skip.
+    showToast('Audio stream failed. Skipping...');
+    if (queue.length > 1) playNext();
+});
 
 let hasAutoSwitchedToImmersive = false;
 
@@ -1336,13 +1568,10 @@ function togglePlay() {
   if (audio.paused) {
     audio.play();
     
-    // --- NEW: Auto-switch to Immersive Mode on FIRST play ---
+    // --- FIX: Switch to the ACTUAL player view, not just the CSS class ---
     if (!hasAutoSwitchedToImmersive) {
       hasAutoSwitchedToImmersive = true;
-      if (!document.body.classList.contains('immersive')) {
-        document.body.classList.add('immersive');
-        scrollToCurrentSong();
-      }
+      switchToPlayerView(); 
     }
   } else {
     audio.pause();
@@ -1375,6 +1604,7 @@ function shuffleRemaining() {
     const remaining = queue.slice(curIdx + 1);
     for(let i = remaining.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [remaining[i], remaining[j]] = [remaining[j], remaining[i]]; }
     queue = [...queue.slice(0, curIdx + 1), ...remaining]; draw(); saveState();
+    showToast("Queue shuffled");
 }
 audio.onended = playNext;
 
@@ -1416,6 +1646,9 @@ audio.ontimeupdate = () => {
     document.getElementById('c-time').innerText = fmt(audio.currentTime);
     document.getElementById('t-time').innerText = fmt(audio.duration);
 
+    if (audio.duration - audio.currentTime <= 15) {
+        preloadNextSong();
+    }
     // Only do the heavy math and scrolling if lyrics are actually enabled!
     if (lyricsEnabled && lyrics.length > 0) {
     let act = -1;
@@ -1508,3 +1741,888 @@ if (immSearch) {
         }
     });
 }
+
+// ==========================================
+// --- DISCOVERY HOMEPAGE & LIVE LINKS ---
+// ==========================================
+
+// 1. Switch between Home and Player views
+// --- STRICT VIEW SWITCHING ---
+function switchToPlayerView() {
+    document.body.classList.remove('home-mode'); 
+    document.body.classList.add('immersive'); // <--- THIS BRINGS YOUR BUTTONS BACK
+    document.body.classList.add('player-mode');
+    switchView('player');
+    
+    // Fix album art bug by forcing a reflow
+    const cover = document.getElementById('album-cover');
+    if (cover && cover.src) cover.style.display = 'block';
+    
+    // Force lyrics scroll to recalculate after layout change
+    setTimeout(() => { if (typeof scrollToCurrentSong === 'function') scrollToCurrentSong(); }, 150);
+}
+
+function switchToHomeView() {
+    document.body.classList.add('home-mode'); // Hides the queue
+    switchView('home');
+    document.body.classList.remove('player-mode');
+    document.body.classList.remove('immersive'); 
+}
+
+// 2. Fetch Data for the Carousels (Our "Shadow Algorithm")
+// ==========================================
+// --- AI TASTE PROFILER & HOMEPAGE ENGINE ---
+// ==========================================
+
+function getTopArtistsFromQueue() {
+    if (queue.length === 0) return [];
+    let counts = {};
+    queue.forEach(s => {
+        if (!s.a || s.a === 'Unknown') return;
+        // Split multiple artists (e.g. "CamelPhat, Elderbrook")
+        let artists = s.a.split(',').map(a => a.trim());
+        artists.forEach(a => counts[a] = (counts[a] || 0) + 1);
+    });
+    // Sort by most played/added, grab top 5
+    return Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
+}
+
+// ==========================================
+// --- 1. AI TASTE PROFILER & HOMEPAGE ENGINE ---
+// ==========================================
+
+async function loadHomepage() {
+    const container = document.getElementById('dynamic-homepage');
+    if (!container) return;
+    container.innerHTML = `<div style="padding: 20px; color: var(--dim);"><span class="material-icons-round" style="animation: spin 1s linear infinite; vertical-align: middle;">sync</span> AI is scanning your history...</div>`;
+    
+    let counts = {};
+    queue.forEach(s => {
+        if (s.a && s.a !== 'Unknown') {
+            s.a.split(',').forEach(a => { let trimA = a.trim(); if(trimA) counts[trimA] = (counts[trimA] || 0) + 1; });
+        }
+    });
+    let topArtists = Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
+    
+    let shelves = [];
+    if (topArtists.length > 0) shelves.push({ q: topArtists[0], title: `Because you love ${topArtists[0]}`, type: 'songs' });
+    if (topArtists.length > 1) shelves.push({ q: topArtists[1], title: `More from ${topArtists[1]}`, type: 'songs' });
+    if (topArtists.length > 2) shelves.push({ q: topArtists[2], title: `${topArtists[2]} Mixes & Playlists`, type: 'playlists' });
+    
+    const fallbacks = [
+        { q: "Global Top 50", title: "Global Playlists", type: "playlists" },
+        { q: "Viral Hits", title: "Internet Viral Songs", type: "songs" },
+        { q: "Lo-Fi Chill", title: "Deep Focus & Chill", type: "playlists" },
+        { q: "Party Anthems", title: "Weekend Party Playlists", type: "playlists" },
+        { q: "Acoustic Pop", title: "Unplugged & Acoustic", type: "songs" }
+    ];
+    shelves = [...shelves, ...fallbacks];
+
+    let html = '';
+    shelves.forEach((item, i) => {
+        html += `
+        <div style="margin-top: 35px;">
+            <h2 style="margin-bottom: 15px; font-size: 1.4rem;">${item.title}</h2>
+            <div id="carousel-${i}" class="horizontal-carousel"></div>
+        </div>`;
+    });
+    container.innerHTML = html;
+
+    for (let i = 0; i < shelves.length; i++) {
+        if (shelves[i].type === 'playlists') populatePlaylistCarousel(shelves[i].q, `carousel-${i}`);
+        else populateCarousel(shelves[i].q, `carousel-${i}`);
+    }
+}
+
+async function populateCarousel(query, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    try {
+        let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=15`);
+        let json = await res.json();
+        let results = (json.data && json.data.results) ? json.data.results : [];
+
+        if (results.length > 0) {
+            let html = "";
+            results.forEach(song => {
+                let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+                let artist = song.artists?.primary?.[0]?.name.replace(/&quot;/g, '"').replace(/&amp;/g, '&') || "Unknown";
+                let cover = song.image?.length > 0 ? song.image[song.image.length - 1].url : "";
+                let dl = song.downloadUrl?.length > 0 ? song.downloadUrl[song.downloadUrl.length - 1].url : "";
+
+                if (dl) {
+                    let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeC = cover ? cover.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
+                    let safeDL = dl.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                    html += `
+<div class="song-card" data-type="song" 
+     data-title="${safeT}" 
+     data-artist="${safeA}" 
+     data-cover="${safeC}" 
+     data-url="${safeDL}" 
+     data-ytid="${song.videoId || ''}"
+     onclick="playDirectlyFromHome('${safeT}', '${safeA}', '${safeC}', '${safeDL}')">
+    <img src="${cover}">
+    <div class="title">${title}</div>
+    <div class="artist">${artist}</div>
+</div>`;
+                }
+            });
+            container.innerHTML = html;
+        } else { container.innerHTML = `<div style="color: var(--dim);">No results found.</div>`; }
+    } catch (e) { container.innerHTML = `<div style="color: var(--dim);">Failed to load row.</div>`; }
+}
+
+async function populatePlaylistCarousel(query, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    try {
+        let res = await fetch(`https://saavn.sumit.co/api/search/playlists?query=${encodeURIComponent(query)}&limit=10`);
+        let json = await res.json();
+        let results = (json.data && json.data.results) ? json.data.results : [];
+
+        if (results.length > 0) {
+            let html = "";
+            results.forEach(pl => {
+                let title = (pl.title || pl.name || "Unknown").replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                let cover = pl.image?.length > 0 ? pl.image[pl.image.length - 1].url : "";
+                
+                html += `
+                <div class="song-card" style="border-radius: 20px; background: rgba(0,0,0,0.4);" onclick="loadSaavnPlaylist('${pl.id}', '${title}')">
+                    <img src="${cover}" style="border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.6);">
+                    <div class="title" style="text-align: center;">${title}</div>
+                    <div class="artist" style="text-align: center;">${pl.songCount || 'Mix'} Tracks</div>
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+    } catch (e) { container.innerHTML = `<div style="color: var(--dim);">Failed to load playlists.</div>`; }
+}
+
+async function loadSaavnPlaylist(id, titleName) {
+    showToast("Fetching Playlist Tracks...");
+    try {
+        let res = await fetch(`https://saavn.sumit.co/api/playlists?id=${id}`);
+        let json = await res.json();
+        if (json.data && json.data.songs) {
+            let mappedSongs = json.data.songs.map(song => {
+                let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+                let artist = song.artists?.primary?.[0]?.name.replace(/&quot;/g, '"').replace(/&amp;/g, '&') || "Unknown";
+                let cover = song.image?.length > 0 ? song.image[song.image.length - 1].url : "";
+                let dl = song.downloadUrl?.length > 0 ? song.downloadUrl[song.downloadUrl.length - 1].url : "";
+                return { t: title, a: artist, cover: cover, p: dl, isOnline: true, needsAudioStream: false };
+            }).filter(s => s.p);
+
+            if (mappedSongs.length > 0) {
+                switchQueueMode('playlist'); 
+                queue = mappedSongs; 
+                curIdx = 0;
+                draw(); saveState(); switchToPlayerView(); play(0);
+                showToast(`Playing ${titleName}!`);
+            } else showToast("No playable tracks in this playlist.");
+        }
+    } catch (e) { showToast("Failed to load playlist."); }
+}
+
+function playDirectlyFromHome(title, artist, cover, url) {
+    const newSong = { t: title, a: artist, p: url, isOnline: true, cover: cover };
+    const insertPos = queue.length === 0 ? 0 : curIdx + 1;
+    queue.splice(insertPos, 0, newSong);
+    saveState(); play(insertPos); switchToPlayerView();
+    const sideSearch = document.getElementById('sidebar-search-results');
+    const immSearch = document.getElementById('imm-search-results');
+    if (sideSearch) sideSearch.style.display = 'none';
+    if (immSearch) immSearch.style.display = 'none';
+}
+
+// ==========================================
+// --- 2. DUAL QUEUE SYSTEM ---
+// ==========================================
+let mainQueue = [], mainIdx = 0;
+let plQueue = [], plIdx = 0;
+let activeQMode = 'main';
+
+function switchQueueMode(mode) {
+    if (activeQMode === mode) return;
+
+    if (activeQMode === 'main') { mainQueue = [...queue]; mainIdx = curIdx; } 
+    else { plQueue = [...queue]; plIdx = curIdx; }
+
+    activeQMode = mode;
+
+    if (activeQMode === 'main') { queue = [...mainQueue]; curIdx = mainIdx; } 
+    else { queue = [...plQueue]; curIdx = plIdx; }
+
+    document.getElementById('btn-q-main').classList.toggle('active', mode === 'main');
+    document.getElementById('btn-q-pl').classList.toggle('active', mode === 'playlist');
+    
+    draw(); saveState(); showToast(`Switched to ${mode === 'main' ? 'Main Queue' : 'Playlist Queue'}`);
+}
+
+// ==========================================
+// --- 3. TRACK OPTIONS (THREE DOTS) ---
+// ==========================================
+function toggleMenu() {
+    const menu = document.getElementById('track-options-dropdown');
+    menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+}
+
+document.addEventListener('click', (e) => {
+    const clearMenu = document.getElementById('clear-menu');
+    if (clearMenu && !e.target.closest('.clear-dropdown-wrap')) clearMenu.style.display = 'none';
+    const dots = document.getElementById('options-trigger');
+    const menu = document.getElementById('track-options-dropdown');
+    if (menu && e.target !== dots && !menu.contains(e.target)) menu.style.display = 'none';
+});
+
+function shareTrack() {
+    const song = queue[curIdx];
+    if (!song) return;
+    navigator.clipboard.writeText(`Listening to ${song.t} by ${song.a} on Pro Media Player!`);
+    showToast("Share text copied to clipboard!");
+    toggleMenu(); 
+}
+
+function downloadTrack() {
+    const s = queue[curIdx];
+    if(!s) return;
+    showToast(`Preparing download for: ${s.t}...`);
+    require('electron').shell.openExternal(s.p);
+    toggleMenu();
+}
+
+function saveToPlaylist() { showToast("Saved to Local Playlist!"); toggleMenu(); }
+
+function goToArtist() {
+    const song = queue[curIdx];
+    if (!song) return;
+    switchToHomeView();
+    const immSearch = document.getElementById('imm-search');
+    immSearch.value = song.a;
+    immSearch.focus();
+    filterQueue(song.a, 'imm-search-results', true);
+    toggleMenu();
+}
+
+// ==========================================
+// --- 4. YOUTUBE MUSIC ARCHITECTURE & ROUTING ---
+// ==========================================
+let currentLoadedPlaylist = [];
+
+function switchView(viewName) {
+    const panels = ['home', 'playlist', 'player'];
+    panels.forEach(v => {
+        const el = document.getElementById(`view-${v}`);
+        if (el) {
+            if (v === viewName) { el.style.display = 'flex'; el.classList.add('active'); } 
+            else { el.style.display = 'none'; el.classList.remove('active'); }
+        }
+    });
+    if (viewName === 'player') document.body.classList.add('immersive');
+    else document.body.classList.remove('immersive');
+
+    document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+    if (viewName === 'home') document.querySelectorAll('.menu-item')[0].classList.add('active');
+    if (viewName === 'player') document.querySelectorAll('.menu-item')[1].classList.add('active');
+}
+
+
+async function fetchYTPlaylist(playlistId, titleName = "YouTube Playlist") {
+    showToast("Syncing with YouTube Music...");
+    await openPlaylist(playlistId, titleName);
+}
+
+async function preloadSidebarPlaylistNames() {
+    const links = Array.from(document.querySelectorAll('.playlist-link[data-playlist-id]'));
+    for (const link of links) {
+        const playlistId = link.getAttribute('data-playlist-id');
+        if (!playlistId) continue;
+        try {
+            const playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId);
+            if (!playlistData) continue;
+            const resolvedName = playlistData.name || playlistData.title;
+            if (!resolvedName) continue;
+            const label = link.querySelector('.playlist-name');
+            if (label) label.innerText = resolvedName;
+        } catch (e) { console.error('Failed to preload playlist name:', playlistId, e); }
+    }
+}
+
+async function openPlaylist(playlistId, titleName) {
+    lockPlaylistSection();
+    document.body.classList.remove('player-mode');
+    switchView('playlist');
+    document.getElementById('pl-detail-title').innerText = titleName;
+    const tracklistEl = document.getElementById('playlist-tracklist');
+    tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);"><span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Scraping tracks from YouTube...</div>`;
+
+    // Uses our new custom scraper in main.js!
+    const playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId);
+    if (!playlistData || !playlistData.songs || playlistData.songs.length === 0) { 
+        tracklistEl.innerHTML = `<div style="color: red; padding: 20px;">Failed to load. Is the playlist public?</div>`; 
+        return; 
+    }
+
+    const resolvedName = playlistData.name || playlistData.title || titleName || "YouTube Playlist";
+    const titleEl = document.getElementById('pl-detail-title');
+    if (titleEl) titleEl.innerText = resolvedName;
+
+    document.getElementById('pl-track-count').innerText = playlistData.songs.length;
+    
+    currentLoadedPlaylist = playlistData.songs.map(song => {
+        let rawCover = song.thumbnails && song.thumbnails.length > 0 ? song.thumbnails[song.thumbnails.length - 1].url : '';
+        let safeCover = rawCover.startsWith('http') ? rawCover : 'https://via.placeholder.com/230';
+        let safeArtist = song.artists ? song.artists.map(a => a.name).join(', ') : 'Unknown';
+        
+        let cleanTitle = typeof smartCleanTitle === 'function' ? smartCleanTitle(song.name, safeArtist) : song.name;
+
+        return {
+            t: cleanTitle, 
+            a: safeArtist, 
+            p: '',
+            cover: safeCover,
+            isOnline: true, 
+            needsAudioStream: true,
+            ytId: song.ytId // <--- THIS TELLS THE PLAYER IT'S A YOUTUBE SONG
+        };
+    });
+
+    if (currentLoadedPlaylist.length > 0 && currentLoadedPlaylist[0].cover) {
+        document.getElementById('pl-detail-img').src = currentLoadedPlaylist[0].cover;
+    }
+
+    let html = '';
+    currentLoadedPlaylist.forEach((song, i) => {
+        html += `
+        <div class="track-row" onclick="playFromPlaylist(${i})">
+            <div class="track-num">${i + 1}</div>
+            <div style="display:flex; flex-direction:column; overflow:hidden;">
+                <span style="color:white; font-weight:bold; white-space:nowrap; text-overflow:ellipsis;">${song.t}</span>
+                <span style="color:var(--dim); font-size:0.85rem; white-space:nowrap; text-overflow:ellipsis;">${song.a}</span>
+            </div>
+            <span class="material-icons-round" style="color:var(--dim); font-size:18px;">more_horiz</span>
+        </div>`;
+    });
+    tracklistEl.innerHTML = html;
+}
+
+function playFromPlaylist(index) {
+    switchQueueMode('playlist'); 
+    queue = [...currentLoadedPlaylist];
+    curIdx = index;
+    saveState(); draw(); switchView('player'); play(index);
+}
+
+function playEntirePlaylist() { if(currentLoadedPlaylist.length === 0) return; playFromPlaylist(0); }
+
+function shuffleEntirePlaylist() {
+    if(currentLoadedPlaylist.length === 0) return;
+    switchQueueMode('playlist');
+    queue = [...currentLoadedPlaylist];
+    for(let i = queue.length - 1; i > 0; i--) { 
+        const j = Math.floor(Math.random() * (i + 1));
+        [queue[i], queue[j]] = [queue[j], queue[i]]; 
+    }
+    curIdx = 0; saveState(); draw(); switchView('player'); play(0);
+}
+
+
+function playSupermixSong(title, artist, cover) {
+    const newSong = { t: title, a: artist, p: '', cover: cover, isOnline: true, needsAudioStream: true };
+    const insertPos = queue.length === 0 ? 0 : curIdx + 1;
+    queue.splice(insertPos, 0, newSong);
+    saveState(); draw(); switchView('player'); play(insertPos);
+}
+
+// ==========================================
+// --- 5. CUSTOM RIGHT CLICK & LOCAL PLAYLIST ---
+// ==========================================
+
+document.addEventListener('contextmenu', (e) => {
+    const card = e.target.closest('.song-card');
+    if (card && card.getAttribute('data-type') === 'song') {
+        e.preventDefault();
+        ctxTargetSong = {
+            t: card.getAttribute('data-title'), a: card.getAttribute('data-artist'),
+            cover: card.getAttribute('data-cover'), p: card.getAttribute('data-url'),
+            isOnline: true, needsAudioStream: false
+        };
+        ctxMenu.style.left = `${e.pageX}px`; ctxMenu.style.top = `${e.pageY}px`;
+        ctxMenu.classList.add('active');
+    }
+});
+
+// Safe Click Listener (Fixes Line 1955 Crash)
+document.addEventListener('click', (e) => { 
+    if (ctxMenu && !e.target.closest('#custom-context-menu')) {
+        ctxMenu.classList.remove('active'); 
+    }
+});
+
+// ==========================================
+// --- CRASH-PROOF MENU ACTIONS ---
+// ==========================================
+
+// We use 'if (element)' so the app NEVER crashes, even if HTML is missing!
+const btnPlayNext = document.getElementById('ctx-play-next');
+if (btnPlayNext) {
+    btnPlayNext.onclick = () => {
+        if (!ctxTargetSong) return;
+        queue.splice(queue.length === 0 ? 0 : curIdx + 1, 0, ctxTargetSong);
+        if (typeof draw === 'function') draw(); 
+        if (typeof saveState === 'function') saveState(); 
+        showToast(`Added "${ctxTargetSong.t}" to play next!`);
+        ctxMenu.classList.remove('active');
+    };
+}
+
+const btnAddBottom = document.getElementById('ctx-add-bottom');
+if (btnAddBottom) {
+    btnAddBottom.onclick = () => {
+        if (!ctxTargetSong) return;
+        queue.push(ctxTargetSong);
+        if (typeof draw === 'function') draw(); 
+        if (typeof saveState === 'function') saveState(); 
+        showToast(`Added "${ctxTargetSong.t}" to bottom!`);
+        ctxMenu.classList.remove('active');
+    };
+}
+
+const btnSaveLocal = document.getElementById('ctx-save-local');
+if (btnSaveLocal) {
+    btnSaveLocal.onclick = () => {
+        if (!ctxTargetSong) return;
+        let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
+        if (!localPl.some(s => s.t === ctxTargetSong.t)) {
+            localPl.push(ctxTargetSong);
+            localStorage.setItem('myLocalPlaylist', JSON.stringify(localPl));
+            showToast("Saved to Local Favorites! ❤️");
+        } else showToast("Already in your favorites!");
+        ctxMenu.classList.remove('active');
+    };
+}
+
+const btnShare = document.getElementById('ctx-share');
+if (btnShare) {
+    btnShare.onclick = () => {
+        if (!ctxTargetSong) return;
+        navigator.clipboard.writeText(`I'm listening to ${ctxTargetSong.t} by ${ctxTargetSong.a}!`);
+        showToast("Share text copied!");
+        ctxMenu.classList.remove('active');
+    };
+}
+
+function openLocalPlaylist() {
+    let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
+    document.body.classList.remove('player-mode'); switchView('playlist');
+    document.getElementById('pl-detail-title').innerText = "Local Favorites ❤️";
+    document.getElementById('pl-track-count').innerText = localPl.length;
+    document.getElementById('pl-detail-img').src = localPl.length > 0 ? localPl[0].cover : 'https://via.placeholder.com/230';
+    
+    const tracklistEl = document.getElementById('playlist-tracklist');
+    if (localPl.length === 0) {
+        tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);">Your favorites list is empty.<br>Right-click songs on the Explore page to add them!</div>`;
+        return;
+    }
+    currentLoadedPlaylist = localPl; 
+    let html = '';
+    localPl.forEach((song, i) => {
+        html += `<div class="track-row" onclick="playFromPlaylist(${i})">
+            <div class="track-num">${i + 1}</div>
+            <div style="display:flex; flex-direction:column; overflow:hidden;">
+                <span style="color:white; font-weight:bold; white-space:nowrap; text-overflow:ellipsis;">${song.t}</span>
+                <span style="color:var(--dim); font-size:0.85rem; white-space:nowrap; text-overflow:ellipsis;">${song.a}</span>
+            </div>
+            <span class="material-icons-round" style="color:#4cc2ff; font-size:18px;">favorite</span>
+        </div>`;
+    });
+    tracklistEl.innerHTML = html;
+}
+
+// ==========================================
+// --- NEW: MANUAL PLAYLIST IMPORTER ---
+// ==========================================
+
+async function importYTPlaylist() {
+    const input = document.getElementById('new-pl-input');
+    const url = input.value.trim();
+    if(!url) return;
+
+    // Extract the Playlist ID from the URL
+    let match = url.match(/[?&]list=([^&#]+)/) || url.match(/^([a-zA-Z0-9_-]+)$/);
+    if(!match) {
+        showToast("Invalid YouTube Playlist URL!");
+        return;
+    }
+    const plId = match[1];
+
+    showToast("Scraping Playlist Data...");
+    const btn = document.querySelector('button[onclick="importYTPlaylist()"]');
+    if (btn) btn.innerText = "Syncing...";
+
+    try {
+        // Fetch public metadata (No login required!)
+        const data = await ipcRenderer.invoke('get-yt-playlist', plId);
+        
+        if(!data || !data.songs) {
+            showToast("Failed to fetch. Is the playlist public?");
+            if (btn) btn.innerText = "+ Add Playlist";
+            return;
+        }
+
+        let saved = JSON.parse(localStorage.getItem('customYTPlaylists') || '[]');
+        if(saved.some(p => p.id === plId)) {
+            showToast("Playlist already added!");
+            input.value = '';
+            if (btn) btn.innerText = "+ Add Playlist";
+            return;
+        }
+
+        saved.push({ id: plId, title: data.name || data.title || "Custom Playlist" });
+        localStorage.setItem('customYTPlaylists', JSON.stringify(saved));
+        
+        input.value = '';
+        showToast(`Saved "${data.name || data.title || 'Playlist'}"!`);
+        renderSidebarPlaylists(); 
+    } catch (e) {
+        showToast("Scraping Error.");
+    }
+    if (btn) btn.innerText = "+ Add Playlist";
+}
+
+function renderSidebarPlaylists() {
+    const container = document.getElementById('sidebar-playlists');
+    if (!container) return;
+
+    // 1. Always render the Local Favorites first
+    let html = `
+        <a class="menu-item playlist-link" onclick="openLocalPlaylist()">
+            <span class="material-icons-round" style="color:#4cc2ff">favorite</span> 
+            <span class="playlist-name" style="font-weight:bold; color:white;">Local Favorites</span>
+        </a>
+    `;
+
+    // 2. Render all manually added YouTube Playlists
+    let saved = JSON.parse(localStorage.getItem('customYTPlaylists') || '[]');
+    saved.forEach(pl => {
+        let safeTitle = pl.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        html += `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding-right:10px;" class="menu-item playlist-link">
+            <a onclick="fetchYTPlaylist('${pl.id}', '${safeTitle}')" style="flex:1; cursor:pointer; display:flex; align-items:center; gap:10px; overflow:hidden;">
+                <span class="material-icons-round" style="color:#ff0000">play_circle</span>
+                <span class="playlist-name" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${pl.title}</span>
+            </a>
+            <span class="material-icons-round" style="color:var(--dim); cursor:pointer; font-size:14px;" onclick="removePlaylist('${pl.id}')" title="Remove">close</span>
+        </div>`;
+    });
+
+    container.innerHTML = html;
+}
+
+function removePlaylist(id) {
+    let saved = JSON.parse(localStorage.getItem('customYTPlaylists') || '[]');
+    saved = saved.filter(p => p.id !== id);
+    localStorage.setItem('customYTPlaylists', JSON.stringify(saved));
+    renderSidebarPlaylists();
+}
+
+// ==========================================
+// --- SAFE AUTO-START & STATE RECOVERY ---
+// ==========================================
+setTimeout(() => { 
+    // 1. Recover Queue safely
+    try {
+        if (queue.length === 0) {
+            const savedQ = localStorage.getItem('queue') || localStorage.getItem('savedQueue');
+            if (savedQ) {
+                queue = JSON.parse(savedQ);
+                if (typeof mainQueue !== 'undefined') mainQueue = [...queue]; 
+                if (typeof draw === 'function') draw(); 
+            }
+        }
+    } catch(e) { console.error("Queue recovery failed"); }
+
+    // 2. Start the AI Recommendation Engine (This fills your homepage!)
+    if (typeof loadHomepage === 'function') loadHomepage(); 
+
+    // 3. Load user's pasted playlists into the sidebar
+    renderSidebarPlaylists();
+}, 500);
+
+// --- SMART YOUTUBE METADATA EXTRACTOR ---
+function smartCleanTitle(rawTitle, rawArtist) {
+    let title = rawTitle;
+
+    // 1. Nuke everything inside brackets/parentheses (Usually "Official Video" or "Lyric Video")
+    title = title.replace(/\[.*?\]|\(.*?\)/g, ' ');
+
+    // 2. Kill all common music junk words
+    title = title.replace(/\b(official|video|audio|lyric|lyrics|remastered|4k|hd|hq|live|cover|remix|ft|feat|featuring|prod|music)\b/ig, ' ');
+
+    // 3. Nuke ALL symbols. Keep ONLY letters, numbers, and spaces.
+    title = title.replace(/[^a-zA-Z0-9\s]/g, ' ');
+
+    // 4. The Smart Logic: Scrub the artist's name OUT of the title to prevent duplicate queries!
+    let mainArtist = rawArtist.split(',')[0].trim();
+    if (mainArtist && mainArtist.toLowerCase() !== "unknown artist") {
+        // Break the artist name into parts (e.g., "Mark", "Ronson") and scrub them from the title
+        let artistParts = mainArtist.split(' ');
+        artistParts.forEach(part => {
+            if (part.length > 2) { // Don't scrub tiny 1-2 letter words accidentally
+                let partRegex = new RegExp(`\\b${part}\\b`, 'ig');
+                title = title.replace(partRegex, ' ');
+            }
+        });
+    }
+
+    // 5. Collapse all the empty spaces left behind into a clean string
+    return title.replace(/\s+/g, ' ').trim();
+}
+
+// ==========================================
+// --- PLAYLIST UI HOVER LOCK ---
+// ==========================================
+let playlistLockTimer;
+
+function lockPlaylistSection() {
+    const plSection = document.getElementById('my-library-section');
+    if (!plSection) return;
+
+    // Force it open
+    plSection.classList.add('locked-open');
+
+    // Clear any existing timer
+    clearTimeout(playlistLockTimer);
+
+    // Remove the lock after 10 seconds
+    playlistLockTimer = setTimeout(() => {
+        plSection.classList.remove('locked-open');
+    }, 10000);
+}
+
+// ==========================================
+// --- LYRICS AUTO-SYNC FAILSAFE ---
+// ==========================================
+let lastLyricFetchTrack = -1;
+
+// This forces the app to fetch lyrics ONLY after the audio physically starts playing.
+// This guarantees that the JioSaavn stream has fully resolved!
+document.getElementById('player').addEventListener('playing', () => {
+    if (lastLyricFetchTrack !== curIdx) {
+        lastLyricFetchTrack = curIdx;
+        
+        // Trigger whatever your default lyrics fetch function is named
+        // (This assumes your function is called fetchLyrics or loadLyrics)
+        if (typeof fetchLyrics === 'function') {
+            fetchLyrics();
+        } else if (typeof loadLyrics === 'function') {
+            loadLyrics();
+        }
+    }
+});
+
+// ==========================================
+// --- BACKGROUND AUDIO PRELOADER ---
+// ==========================================
+let lastPreloadedIdx = -1;
+
+async function preloadNextSong() {
+    const nextIdx = curIdx + 1;
+    if (nextIdx >= queue.length) return; // Stop if we are at the end of the playlist
+    
+    // Prevent spamming the API if we already preloaded this song
+    if (lastPreloadedIdx === nextIdx) return; 
+
+    const nextSong = queue[nextIdx];
+    
+    // If it's a local file, or if we already have the URL saved, do nothing!
+    if (!nextSong.isOnline || (!nextSong.needsAudioStream && nextSong.p)) return; 
+
+    lastPreloadedIdx = nextIdx; // Lock it so it only runs once
+    console.log(`[Preloader] Silently fetching audio for next track: ${nextSong.t}...`);
+
+    let foundStream = false;
+
+    // 1. COBALT
+    if (nextSong.ytId && !foundStream) {
+        try {
+            let res = await fetch("https://co.wuk.sh/api/json", {
+                method: "POST",
+                headers: { "Accept": "application/json", "Content-Type": "application/json" },
+                body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${nextSong.ytId}`, isAudioOnly: true }),
+                signal: AbortSignal.timeout(6000)
+            });
+            if (res.ok) {
+                let json = await res.json();
+                if (json && json.url) { nextSong.p = json.url; foundStream = true; }
+            }
+        } catch(e) {}
+    }
+
+    // 2. PIPED
+    if (!foundStream && nextSong.ytId) {
+        const pipedServers = ["https://pipedapi.kavin.rocks", "https://pipedapi.smnz.de", "https://api.piped.projectsegfau.lt"];
+        for (const server of pipedServers) {
+            try {
+                let res = await fetch(`${server}/streams/${nextSong.ytId}`, { signal: AbortSignal.timeout(4000) });
+                if (res.ok) {
+                    let json = await res.json();
+                    let bestAudio = json.audioStreams?.find(st => st.mimeType?.includes("mp4") || st.mimeType?.includes("webm"));
+                    if (bestAudio?.url) { nextSong.p = bestAudio.url; foundStream = true; break; }
+                }
+            } catch (e) {}
+        }
+    }
+
+    // 3. SAAVN
+    if (!foundStream) {
+        const saavnApis = [
+            `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(nextSong.a + " " + nextSong.t)}&limit=1`,
+            `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(nextSong.t)}&limit=1`
+        ];
+        for (const url of saavnApis) {
+            try {
+                let res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+                let json = await res.json();
+                let results = json.data?.results || [];
+                if (results.length > 0 && results[0].downloadUrl?.length > 0) {
+                    nextSong.p = results[0].downloadUrl[results[0].downloadUrl.length - 1].url;
+                    foundStream = true; break;
+                }
+            } catch (e) {}
+        }
+    }
+
+    if (foundStream && nextSong.p) {
+        nextSong.needsAudioStream = false; // Mark it as ready!
+        saveState();
+        console.log(`[Preloader] Success! Next song is locked and loaded.`);
+    } else {
+        lastPreloadedIdx = -1; // If it fails, reset it so play() can try again normally
+    }
+}
+
+
+// Call this inside your existing window.onload
+const originalOnload = window.onload;
+window.onload = () => {
+    if(originalOnload) originalOnload();
+};
+// ==========================================
+// --- PRO CONTEXT MENU ENGINE ---
+// ==========================================
+
+// 1. Force base styling directly through JS so it NEVER fails to show
+if (ctxMenu) {
+    ctxMenu.style.position = 'fixed';
+    ctxMenu.style.zIndex = '999999';
+    ctxMenu.style.background = '#1a1a1a';
+    ctxMenu.style.border = '1px solid var(--accent)';
+    ctxMenu.style.borderRadius = '8px';
+    ctxMenu.style.padding = '8px 0';
+    ctxMenu.style.boxShadow = '0 10px 30px rgba(0,0,0,0.8)';
+    ctxMenu.style.display = 'none'; // Hidden by default
+    ctxMenu.style.minWidth = '180px';
+}
+
+// ==========================================
+// --- 5. CUSTOM RIGHT CLICK & LOCAL PLAYLIST ---
+// ==========================================
+
+
+// 1. Right-Click Listener
+document.addEventListener('contextmenu', (e) => {
+    const card = e.target.closest('.song-card');
+    
+    if (card && card.getAttribute('data-type') === 'song') {
+        e.preventDefault();
+        
+        // Grab all the data needed to actually play the song
+        ctxTargetSong = {
+            t: card.getAttribute('data-title'), 
+            a: card.getAttribute('data-artist'),
+            cover: card.getAttribute('data-cover'), 
+            p: card.getAttribute('data-url'),
+            ytId: card.getAttribute('data-ytid'), // MUST HAVE THIS for YouTube
+            isOnline: true, 
+            needsAudioStream: !card.getAttribute('data-url')
+        };
+
+        // Inject the buttons so they know exactly which song to pass to the helpers!
+        ctxMenu.innerHTML = `
+            <div class="context-item" onclick="playNextDirect(ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
+            <div class="context-item" onclick="addToQueueDirect(ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
+            <div class="context-item" onclick="openPlaylistPicker(ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
+        `;
+
+        // Position it and force it to be visible using 'block'
+        ctxMenu.style.left = `${e.pageX}px`; 
+        ctxMenu.style.top = `${e.pageY}px`;
+        ctxMenu.style.display = 'block'; 
+    }
+});
+
+// 2. Safe Click Listener (Hide Menu)
+document.addEventListener('click', (e) => { 
+    if (ctxMenu && !e.target.closest('#custom-context-menu')) {
+        ctxMenu.style.display = 'none'; // Replaced classList.remove with display = 'none'
+    }
+});
+
+// 3. Context Menu Action Helpers
+function playNextDirect(song) {
+    queue.splice(curIdx + 1, 0, song);
+    draw(); saveState();
+    showToast(`"${song.t}" will play next!`);
+    ctxMenu.style.display = 'none';
+}
+
+function addToQueueDirect(song) {
+    queue.push(song);
+    draw(); saveState();
+    showToast(`"${song.t}" added to bottom of queue`);
+    ctxMenu.style.display = 'none';
+}
+
+function openPlaylistPicker(song) {
+    let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
+    // Check if song already exists in the playlist
+    if (!localPl.some(s => s.t === song.t)) {
+        localPl.push(song);
+        localStorage.setItem('myLocalPlaylist', JSON.stringify(localPl));
+        showToast("Added to Local Favorites! ❤️");
+    } else {
+        showToast("Already in favorites!");
+    }
+    ctxMenu.style.display = 'none';
+}
+
+function openLocalPlaylist() {
+    let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
+    document.body.classList.remove('player-mode'); switchView('playlist');
+    document.getElementById('pl-detail-title').innerText = "Local Favorites ❤️";
+    document.getElementById('pl-track-count').innerText = localPl.length;
+    document.getElementById('pl-detail-img').src = localPl.length > 0 ? localPl[0].cover : 'https://via.placeholder.com/230';
+    
+    const tracklistEl = document.getElementById('playlist-tracklist');
+    if (localPl.length === 0) {
+        tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);">Your favorites list is empty.<br>Right-click songs to add them!</div>`;
+        return;
+    }
+    currentLoadedPlaylist = localPl; 
+    let html = '';
+    localPl.forEach((song, i) => {
+        html += `<div class="track-row" onclick="playFromPlaylist(${i})">
+            <div class="track-num">${i + 1}</div>
+            <div style="display:flex; flex-direction:column; overflow:hidden;">
+                <span style="color:white; font-weight:bold; white-space:nowrap; text-overflow:ellipsis;">${song.t}</span>
+                <span style="color:var(--dim); font-size:0.85rem; white-space:nowrap; text-overflow:ellipsis;">${song.a}</span>
+            </div>
+            <span class="material-icons-round" style="color:#4cc2ff; font-size:18px;">favorite</span>
+        </div>`;
+    });
+    tracklistEl.innerHTML = html;
+}
+//yo

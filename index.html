@@ -10,125 +10,199 @@
 <body>
   <div id="bg-blur"></div>
   <div id="toast"></div>
-  
-  <div class="main">
-    <div class="sidebar">
-      <div class="top-controls">
-        <div class="dropdown">
-          <button class="btn" style="flex:1; justify-content:center"><span class="material-icons-round">delete_sweep</span> Clear</button>
-          <div class="dropdown-content">
-            <a onclick="clearQueue('all')">Clear All (Keep Current)</a>
-            <a onclick="clearQueue('recents')">Clear Recents (Above Current)</a>
-          </div>
-        </div>
-        <button class="btn" style="width:auto; padding: 12px;" onclick="document.getElementById('fld').click()" title="Add Folder"><span class="material-icons-round" style="margin:0">create_new_folder</span></button>
-        <button class="btn" style="width:auto; padding: 12px;" onclick="document.getElementById('fls').click()" title="Add to Bottom"><span class="material-icons-round" style="margin:0">add_box</span></button>
-        <button class="btn" style="width:auto; padding: 12px;" onclick="document.getElementById('fls-next').click()" title="Add Next"><span class="material-icons-round" style="margin:0">queue_play_next</span></button>
-      </div>
-      
-      <input type="file" id="fld" webkitdirectory style="display:none">
-      <input type="file" id="fls" multiple style="display:none">
-      <input type="file" id="fls-next" multiple style="display:none">
-      
-      <input type="text" class="search-box" id="sidebar-search" placeholder="Search to Play Next... (S)" oninput="filterQueue(this.value, 'queue-list')">
 
-      <div class="list-container" id="queue-list" onscroll="handleManualScroll(event)"></div>
+  <input type="file" id="fld" webkitdirectory style="display:none">
+  <input type="file" id="fls" multiple style="display:none">
+  <input type="file" id="fls-next" multiple style="display:none">
+
+  <div id="retry-overlay">
+    <div style="width:100%; max-width:900px; display:flex; justify-content:space-between; align-items:center; margin-bottom:30px;">
+      <h1 style="font-weight:900;">Alternative Lyrics</h1>
+      <span class="material-icons-round retry-check-btn" onclick="exitRetryUI()" style="cursor:pointer">close</span>
     </div>
-
-    <div style="flex:1; display:flex; flex-direction:column; position:relative;">
-      
-      <div class="imm-search-container">
-        <span class="material-icons-round" style="color:var(--dim)">search</span>
-        <input type="text" class="imm-search-input" id="imm-search" placeholder="Search queue & online to play next... (S)" oninput="filterQueue(this.value, 'imm-search-results', true)">
-      </div>
-      <div class="imm-search-results" id="imm-search-results"></div>
-      
-      <div id="retry-overlay">
-        <div style="width:100%; max-width:900px; display:flex; justify-content:space-between; align-items:center; margin-bottom:30px;">
-          <h1 style="font-weight:900;">Alternative Lyrics</h1>
-          <span class="material-icons-round retry-check-btn" onclick="exitRetryUI()" style="cursor:pointer">close</span>
-        </div>
-        <div style="overflow-y:auto; width:100%; flex:1; display:flex; flex-direction:column; align-items:center;" id="retry-results-container"></div>
-      </div>
-
-      <div id="retry-preview-modal">
-        <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
-          <button class="btn" style="width:auto" onclick="closeRetryPreview()">Back to Results</button>
-          <span class="material-icons-round retry-check-btn" onclick="selectRetryLyrics()" style="color:var(--accent); background:rgba(76,194,255,0.1); cursor:pointer;">check_circle</span>
-        </div>
-        <div id="preview-full-lyrics" style="overflow-y:auto; flex:1; color:var(--dim); line-height:1.6; font-family:monospace; padding-bottom: 20px;"></div>
-      </div>
-
-      <img id="album-cover" class="album-cover" src="" style="display: none;">
-      <div class="lyrics-view" id="l-view"><div id="l-content"></div></div>
-      
-      <div class="basic-lyrics-btn" onclick="toggleImmersive()" title="Toggle Immersive Lyrics (M)">
-        <span class="material-icons-round">lyrics</span>
-      </div>
-
-      <div class="lyric-tools">
-        <div class="sync-ui" id="sync-ui">
-          <span class="material-icons-round tool-btn" onmousedown="startSync(-0.2)" onmouseup="stopSync()" onmouseleave="stopSync()">remove</span>
-          
-          <input type="text" id="sync-val" 
-                 value="0.0s" 
-                 onchange="manualSyncInput(this.value)"
-                 style="background:transparent; border:none; color:white; font-weight:bold; font-family:monospace; width:60px; text-align:center; outline:none; cursor:text;">
-          
-          <span class="material-icons-round tool-btn" onmousedown="startSync(0.2)" onmouseup="stopSync()" onmouseleave="stopSync()">add</span>
-        </div>
-        
-        <span class="material-icons-round tool-btn" id="btn-ai-sync" onclick="triggerManualAIGeneration()" title="AI Auto-Sync (Fast)" style="display:none; color:var(--accent); text-shadow: 0 0 10px var(--accent);">auto_awesome</span>
-        
-        <span class="material-icons-round tool-btn" id="btn-sync" onclick="toggleSyncUI()" title="Adjust Sync">timer</span>
-        <span class="material-icons-round tool-btn" id="btn-retry" onclick="triggerRetryUI()" title="Retry Alternative Lyrics (R)">sync</span>
-        <span class="material-icons-round tool-btn" id="btn-nolyrics" onclick="toggleNoLyrics()" title="Disable Lyrics (X)">block</span>
-        <span class="material-icons-round tool-btn" id="btn-edit" onclick="toggleEditMode()" title="In-Place Edit Lyrics">edit</span>
-      </div>
-
-      <div class="hover-queue-hitbox"></div>
-      <div class="hover-queue" id="hover-q">
-        <h3 style="margin-bottom: 15px; color: var(--dim); font-size: 0.9rem;">Coming Up Next</h3>
-        <div class="list-container" id="hover-queue-list"></div>
-      </div><span class="material-icons-round queue-hint">chevron_left</span>
-    </div>
+    <div style="overflow-y:auto; width:100%; flex:1; display:flex; flex-direction:column; align-items:center;" id="retry-results-container"></div>
   </div>
 
-  <div class="player-bar">
-    <div class="info" onclick="toggleImmersive()" title="Click to toggle Immersive View (M)">
+  <div id="retry-preview-modal">
+    <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
+      <button class="yt-btn-secondary" onclick="closeRetryPreview()">Back to Results</button>
+      <span class="material-icons-round retry-check-btn" onclick="selectRetryLyrics()" style="color:var(--accent); background:rgba(76,194,255,0.1); cursor:pointer;">check_circle</span>
+    </div>
+    <div id="preview-full-lyrics" style="overflow-y:auto; flex:1; color:var(--dim); line-height:1.6; font-family:monospace; padding-bottom: 20px;"></div>
+  </div>
+  
+  <div class="app-layout">
+    
+    <nav class="yt-sidebar">
+      <div class="sidebar-header">
+        <span class="material-icons-round" style="color: white; font-size: 28px;">library_music</span>
+        <h2>Pro Media</h2>
+      </div>
+      
+      <div class="sidebar-menu">
+        <a class="menu-item active" onclick="switchView('home')">
+          <span class="material-icons-round">home</span> Home
+        </a>
+        <a class="menu-item" onclick="switchView('player')">
+          <span class="material-icons-round">lyrics</span> Now Playing
+        </a>
+      </div>
+
+      <div class="sidebar-search-wrap" style="position: relative;">
+        <span class="material-icons-round">search</span>
+        <input type="text" id="sidebar-search" placeholder="Search queue + online..." oninput="filterQueue(this.value, 'sidebar-search-results', true)">
+        
+        <div id="sidebar-search-results" class="search-results-dropdown" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 400px; overflow-y: auto; background: rgba(15,15,15,0.98); z-index: 1000; border: 1px solid #333; border-top: none;"></div>
+      </div>
+
+      <hr class="sidebar-divider">
+
+      <div class="sidebar-section playlist-section">
+        <h3>My Library</h3>
+        <div class="playlist-links" id="sidebar-playlists">
+          </div>
+        
+        <div style="padding: 10px 20px; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 10px;">
+          <input type="text" id="new-pl-input" placeholder="Paste YT Playlist URL..." style="width:100%; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); color:white; padding:8px 12px; border-radius:6px; margin-bottom:8px; font-size:0.8rem;">
+          <button onclick="importYTPlaylist()" style="width:100%; background:rgba(76,194,255,0.1); border:1px solid var(--accent); color:var(--accent); padding:8px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:0.8rem; transition: 0.2s;">+ Add Playlist</button>
+        </div>
+      </div>
+      
+      <div class="local-queue-container">
+          <div style="display:flex; justify-content:space-between; align-items:center; padding: 10px 10px 5px;">
+              <h3 style="margin:0;">Up Next</h3>
+              <div class="queue-tools">
+                <span class="material-icons-round compact-btn" onclick="document.getElementById('fld').click()" title="Add Folder">drive_folder_upload</span>
+                <span class="material-icons-round compact-btn" onclick="document.getElementById('fls').click()" title="Add Files">queue_music</span>
+                <span class="material-icons-round compact-btn" onclick="document.getElementById('fls-next').click()" title="Add Next">playlist_add</span>
+                <div class="clear-dropdown-wrap">
+                  <span class="material-icons-round compact-btn" onclick="toggleClearMenu()" title="Clear">delete_sweep</span>
+                  <div id="clear-menu" class="tiny-dropdown">
+                    <a onclick="clearQueue('all')">Clear All</a>
+                    <a onclick="clearQueue('recents')">Clear Recents</a>
+                  </div>
+                </div>
+              </div>
+          </div>
+
+          <div class="queue-toggle-wrapper">
+              <div class="queue-toggle">
+                  <div id="btn-q-main" class="q-toggle-half active" onclick="switchQueueMode('main')" title="Main Queue"><span class="material-icons-round">queue_music</span></div>
+                  <div id="btn-q-pl" class="q-toggle-half" onclick="switchQueueMode('playlist')" title="Playlist Queue"><span class="material-icons-round">featured_play_list</span></div>
+              </div>
+          </div>
+
+          <div class="list-container" id="queue-list" onscroll="handleManualScroll(event)"></div>
+      </div>
+    </nav>
+
+    <main class="yt-content">
+      
+      <div id="view-home" class="view-panel active">
+        <h1 class="page-title" style="font-size: 3rem; font-weight: 900; margin-bottom: 30px;">Explore</h1>
+        <div id="dynamic-homepage"></div>
+      </div>
+
+      <div id="view-playlist" class="view-panel">
+        <div class="playlist-header">
+            <img src="https://music.youtube.com/img/favicon_144.png" id="pl-detail-img">
+            <div class="pl-info">
+                <h1 id="pl-detail-title">Loading Playlist...</h1>
+                <p>YouTube Music Sync • <span id="pl-track-count">0</span> tracks</p>
+                <div class="pl-actions">
+                    <button class="yt-btn-primary" onclick="playEntirePlaylist()"><span class="material-icons-round">play_arrow</span> Play All</button>
+                    <button class="yt-btn-secondary" onclick="shuffleEntirePlaylist()"><span class="material-icons-round">shuffle</span> Shuffle</button>
+                </div>
+            </div>
+        </div>
+        <div class="tracklist-container" id="playlist-tracklist">
+            </div>
+      </div>
+
+      <div id="view-player" class="view-panel" style="position:relative; overflow:hidden; padding: 0;">
+        <img id="album-cover" class="album-cover" src="" style="display: none;">
+        <div class="immersive-search-wrap">
+          <input type="text" id="imm-search" placeholder="Search in queue + online..." oninput="filterQueue(this.value, 'imm-search-results', true)">
+          <div id="imm-search-results"></div>
+        </div>
+        
+        <span class="material-icons-round nav-back-btn" id="nav-back-btn" onclick="switchToHomeView()">arrow_back_ios_new</span>
+
+        <div class="lyrics-view" id="l-view"><div id="l-content"></div></div>
+        
+        <div class="lyric-tools">
+          <div class="sync-ui" id="sync-ui">
+            <span class="material-icons-round tool-btn" onmousedown="startSync(-0.2)" onmouseup="stopSync()" onmouseleave="stopSync()">remove</span>
+            <input type="text" id="sync-val" value="0.0s" onchange="manualSyncInput(this.value)" style="background:transparent; border:none; color:white; font-weight:bold; font-family:monospace; width:60px; text-align:center; outline:none; cursor:text;">
+            <span class="material-icons-round tool-btn" onmousedown="startSync(0.2)" onmouseup="stopSync()" onmouseleave="stopSync()">add</span>
+          </div>
+          
+          <span class="material-icons-round tool-btn" id="btn-ai-sync" onclick="triggerManualAIGeneration()" title="AI Auto-Sync (Fast)" style="display:none; color:var(--accent); text-shadow: 0 0 10px var(--accent);">auto_awesome</span>
+          <span class="material-icons-round tool-btn" id="btn-sync" onclick="toggleSyncUI()" title="Adjust Sync">timer</span>
+          <span class="material-icons-round tool-btn" id="btn-retry" onclick="triggerRetryUI()" title="Retry Alternative Lyrics (R)">sync</span>
+          <span class="material-icons-round tool-btn" id="btn-nolyrics" onclick="toggleNoLyrics()" title="Disable Lyrics (X)">block</span>
+          <span class="material-icons-round tool-btn" id="btn-edit" onclick="toggleEditMode()" title="In-Place Edit Lyrics">edit</span>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <div class="hover-queue-hitbox" style="position:fixed; top:0; right:0; width:30px; height:100vh; z-index:90;"></div>
+  
+  <aside class="hover-queue" id="hover-q">
+    <div class="hover-q-title">Up Next</div>
+    <div class="list-container" id="hover-queue-list"></div>
+  </aside>
+  
+  <span class="material-icons-round queue-hint">chevron_left</span>
+
+  <footer class="yt-player-bar">
+    <div class="info" onclick="switchView('player')">
       <div class="display-title" id="cur-t">No Song</div>
       <div class="display-artist" id="cur-a">Ready</div>
     </div>
-    <div class="controls">
-      <div style="display:grid; grid-template-columns: 1fr auto 1fr; width:100%; align-items:center; margin-bottom: 8px; gap: 25px;">
+    
+    <div class="controls-wrapper">
+      <div class="main-controls">
+        <span class="material-icons-round ctrl-icon" onclick="shuffleRemaining()" title="Shuffle Remaining">shuffle</span>
+        <span class="material-icons-round ctrl-icon" onclick="playPrev()" title="Previous">skip_previous</span>
+        <button class="play-btn" onclick="togglePlay()"><span class="material-icons-round" id="p-icon">play_arrow</span></button>
+        <span class="material-icons-round ctrl-icon" onclick="playNext()" title="Next">skip_next</span>
         
-        <div style="display:flex; gap:25px; justify-content:flex-end; align-items:center;">
-            <span class="material-icons-round" id="btn-toggle-lyrics" onclick="toggleLyrics()" style="cursor:pointer;" title="Toggle Lyrics CPU Mode (T)">subtitles</span>
-            <span class="material-icons-round" onclick="shuffleRemaining()" style="cursor:pointer; color:var(--dim)" title="Shuffle Remaining (Z)">shuffle</span>
-            <span class="material-icons-round" onclick="playPrev()" style="cursor:pointer">skip_previous</span>
+        <div style="position: relative;">
+            <span class="material-icons-round ctrl-icon" id="options-trigger" onclick="toggleMenu()" title="More Options">more_vert</span>
+            <div id="track-options-dropdown" class="dropdown-content" style="display: none; position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); min-width: 160px; z-index: 60; border: 1px solid #333; border-radius: 8px; background: #222;">
+              <a onclick="shareTrack()">Share Link</a>
+              <a onclick="downloadTrack()">Download MP3</a>
+              <a onclick="saveToPlaylist()">Save to Playlist</a>
+            </div>
         </div>
-
-        <div style="display:flex; justify-content:center;">
-            <button class="play-btn" onclick="togglePlay()" title="Play / Pause (Space)"><span class="material-icons-round" id="p-icon" style="font-size:32px">play_arrow</span></button>
-        </div> <div style="display:flex; gap:25px; justify-content:flex-start; align-items:center;">
-            <span class="material-icons-round" onclick="playNext()" style="cursor:pointer">skip_next</span>
-        </div> 
       </div>
       
-      <div style="width:100%; display:flex; align-items:center; gap:12px">
-        <small id="c-time" style="width:40px">0:00</small>
+      <div class="progress-container" style="width: 100%; display: flex; align-items: center; gap: 12px;">
+        <small id="c-time" style="width:40px; text-align:right; color:var(--dim);">0:00</small>
         <div class="progress-bar" id="pb"><div class="progress-fill" id="fill"></div></div>
-        <small id="t-time" style="width:40px">0:00</small>
-      </div>    
+        <small id="t-time" style="width:40px; color:var(--dim);">0:00</small>
+      </div>
     </div>
-    <div style="width:25%; display:flex; justify-content:flex-end; align-items:center;">
-      <span class="material-icons-round" style="margin-right:10px; color:var(--dim)">volume_up</span>
+
+    <div class="volume-controls">
+      <span class="material-icons-round ctrl-icon" onclick="toggleLyrics()" id="btn-toggle-lyrics" title="Toggle Lyrics Display">subtitles</span>
+      <span class="material-icons-round ctrl-icon">volume_up</span>
       <input type="range" id="vol" min="0" max="1" step="0.01" value="1">
     </div>
-  </div>
+  </footer>
 
   <audio id="player"></audio>
-
   <script src="renderer.js"></script>
+  <script src="renderer.js"></script>
+<script src="tutorial.js"></script>
+  <div id="custom-context-menu" class="context-menu">
+      <div class="context-item" id="ctx-play-next"><span class="material-icons-round">queue_play_next</span> Play Next</div>
+      <div class="context-item" id="ctx-add-bottom"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
+      <div class="context-item" id="ctx-save-local"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
+      <div class="context-item" id="ctx-share"><span class="material-icons-round">share</span> Share Link</div>
+  </div>
 </body>
 </html>
