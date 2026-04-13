@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+build/
+*.mp3
+*.exe
+*.dmg
+*.zip
+.env
