@@ -1,3 +1,69 @@
-🎵 Mass Media Player ProA high-performance, lightweight desktop music player built for the modern audiophile. It combines the speed of direct API streaming with a powerful AI-driven lyrics engine to deliver a cinematic, distraction-free listening experience.⚡ The "Instant-Play" ArchitectureUnlike standard players that rely on heavy YouTube scraping for every track, this player uses a tiered routing system to ensure music starts the moment you click it.Primary Search (JioSaavn API): Global searches return direct .mp4 and .m4a audio streams. This bypasses slow resolution steps and plays single tracks instantly.Failover Engine: If a stream is interrupted, the player automatically cycles through Cobalt and Piped API mirrors to find a working link.Playlist Importer: A custom recursive token-hunter scrapes entire YouTube playlists from a single link and injects them into your queue.🎤 Immersive Lyrics EngineThe player doesn't just show lyrics; it understands them.Smart Syncing: Automatically fetches synced .lrc data from the LRCLIB database.AI "Rubber Band" Interpolation: If only plain text is found, custom AI logic anchors known words and mathematically stretches the timestamps to fit the song's exact duration.Manual Precision: Features a dedicated manual sync UI with hold-to-scroll buttons for micro-adjustments (+/- 0.1s).Permanent Memory: Every custom sync offset and blocked lyric preference is saved per track.🖱️ Pro Navigation & ControlDesigned for users who want power at their fingertips without cluttering the UI.Keyboard Master ListKeyActionSpacePlay / PauseMToggle between Home and Immersive Lyrics ViewSFocus Search Bar (Auto-switches based on current view)ZShuffle remaining songs in the queueTToggle Lyrics Engine (Low-CPU mode)ROpen Alternative Lyrics / Retry MenuXBlock/Hide lyrics for the current trackEscClear search results and close all active menusThe Right-Click MenuA custom context menu is natively injected into the DOM, allowing you to manage your library without opening settings.Play Next: Slices a song into the next slot in the queue.Add to Bottom: Appends the track to the current session.Local Favorites: One-click save to your persistent favorite playlist.🛠️ Technical ImplementationFramework: Electron.js (Chromium + Node.js).Dual-Queue Logic: Separate Main and Playlist memory arrays so you never lose your spot.Audio Core: HTML5 Audio API with custom race-condition handling to prevent glitchy track skips.UI/UX: Zero-blur SVG mask tutorial engine with live action simulation.🚀 Getting StartedClone the project:Bashgit clone https://github.com/mahitmass/music_with_LYRICS.git
-Install dependencies:Bashnpm install
-Run the app:Bashnpm start
+# 🎵 Pro Media Player
+
+> A premium, lightweight desktop music player designed for high-quality local listening with **AI-Powered Synced Lyrics** and **Immersive Visuals**.
+
+## 🌟 Overview
+
+Most modern players are either too heavy, hide synced lyrics behind a subscription, or completely fail when a song isn't in their database. This player focuses on:
+
+* **Privacy & Speed:** It plays your local `.mp3` files without tracking your data.
+* **Smart Syncing:** Fetches perfect lyrics from the LRCLIB database, and uses Local AI to automatically sync plain text when timed lyrics don't exist.
+* **Immersive Vibe:** A dedicated full-screen mode that blurs your album art for a cinematic background, complete with auto-fading UI for a distraction-free experience.
+
+---
+
+## 🚀 How to Run
+
+### Option 1: Standalone Installer (Recommended)
+If you just want to listen to music:
+1. Navigate to the **`dist/`** (or GitHub Releases) folder.
+2. Download **`music-player Setup 1.1.0.exe`**.
+3. Run the installer to add the player to your Start Menu and Desktop.
+
+### Option 2: Run from Source (For Developers)
+To modify the code or run via terminal:
+
+**1. Clone the repository:**
+```bash
+git clone [https://github.com/mahitmass/music_with_LYRICS.git](https://github.com/mahitmass/music_with_LYRICS.git)
+cd music_with_LYRICS
+2. Install Dependencies: (This recreates the node_modules folder)
+
+Bash
+npm install
+3. Launch the App:
+
+Bash
+npm start
+✨ AI & Smart Sync Features
+Background AI Queue: Queue up multiple plain-text songs for AI synchronization. The app processes them sequentially in the background without freezing your music.
+
+"Rubber Band" Interpolation: Custom AI logic that anchors known words and mathematically stretches the timestamps in between, making it impossible for fast songs (like rap or remixes) to drift out of sync.
+
+Smart Duration Sorting: When searching for alternative lyrics, the app automatically compares the length of your local audio file to the database and pushes the most accurate match to the absolute top.
+
+Fallback Generator: If the database is completely empty, you can force the AI to transcribe and time the lyrics entirely from scratch directly from the Retry menu.
+
+🎧 Key Player Features
+Cinematic Idle Fade: If the app is left running in the background for 10 minutes, the player controls gracefully fade out to provide a gorgeous, distraction-free "Screenshot Mode."
+
+Precision Auto-Scroller: The queue automatically and silently snaps the currently playing song to the dead center of your screen, whether you are in the sidebar or Immersive mode.
+
+Advanced Manual Sync: Dial in your lyric timing perfectly. Hold down the + / - buttons to scroll the time, or click the number to manually type an exact offset (e.g., -2.5s).
+
+Smart Drag & Drop: Drag files from Windows Explorer directly into the queue to insert them at specific positions.
+
+Interactive Lyrics: Click any line in the lyrics view to jump the song instantly to that timestamp.
+
+Persistent Memory: Remembers your queue, your last played track, and your custom sync offsets for every individual song, even after closing the app.
+
+🛠 Technical Stack
+Framework: Electron.js (Node.js & Chromium)
+
+Frontend: Vanilla JavaScript, HTML5, CSS3
+
+Audio: HTML5 Audio API & Web Audio API (for AI buffer decoding)
+
+Metadata: music-metadata (Extracts embedded Album Art & Tags)
+
+Lyrics API: LRCLIB (Open-source lyrics database)
