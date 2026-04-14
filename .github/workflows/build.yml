@@ -1,4 +1,3 @@
-
 name: Build Mac App
 
 # This allows you to trigger the build manually from the GitHub website
@@ -11,22 +10,23 @@ jobs:
 
     steps:
       - name: Check out the code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'npm'
 
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Mac (.dmg) file
-        # Forces electron-builder to create a Mac installer
-        run: npx electron-builder --mac --publish never
+      - name: Build Mac (.dmg) files
+        # 🔥 THE FIX: Added --x64 and --arm64 to generate TWO separate DMG installers
+        run: npx electron-builder --mac --x64 --arm64 --publish never
 
-      - name: Upload the final Mac app
+      - name: Upload the final Mac apps
         uses: actions/upload-artifact@v4
         with:
-          name: Mac-Installer
+          name: Mac-Installers
           path: dist/*.dmg
