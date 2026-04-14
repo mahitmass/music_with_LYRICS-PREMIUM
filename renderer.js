@@ -1,6 +1,6 @@
-const ctxMenu = document.getElementById('custom-context-menu');
-let ctxTarget = null;
-let toastTimeout;
+var ctxMenu = document.getElementById('custom-context-menu');
+var ctxTargetSong = null;
+var toastTimeout;
 function showToast(msg) {
     const toast = document.getElementById('toast');
     if(!toast) return;
@@ -8,6 +8,19 @@ function showToast(msg) {
     toast.classList.add('show');
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => toast.classList.remove('show'), 4000);
+}
+function normalizeSaavnUrl(url) {
+    if (!url) return '';
+    return url.replace('aac.saavncdn.com', 'c.saavncdn.com');
+}
+
+function pickBestSaavnDownload(downloadUrlArray) {
+    if (!Array.isArray(downloadUrlArray) || downloadUrlArray.length === 0) return '';
+    const preferred =
+        downloadUrlArray.find(u => u.quality === '160kbps') ||
+        downloadUrlArray.find(u => u.quality === '320kbps') ||
+        downloadUrlArray[downloadUrlArray.length - 1];
+    return normalizeSaavnUrl(preferred?.url || '');
 }
 
 // Checks computer memory to see if you left lyrics ON or OFF last time
@@ -301,68 +314,124 @@ function filterQueue(query, targetId, isImmersive = false) {
 // ==========================================
 // --- GLOBAL ONLINE SEARCH (JIOSAAVN API) ---
 // ==========================================
-async function fetchOnlineSearch(query, targetId) {
-    const container = document.getElementById(targetId);
-    if (!container) return;
-    
+async function fetchOnlineSearch(query, containerId) {
+    const container = document.getElementById(containerId);
+    if(!container) return;
+
     try {
-        // THE FIX: Direct fetch to JioSaavn API instead of YT Music
-        let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=15`);
+        let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=40`);
+        if (!res.ok) throw new Error("API Blocked");
+        
         let json = await res.json();
         let results = (json.data && json.data.results) ? json.data.results : [];
-        
-        if (results.length === 0) {
-            container.innerHTML = `<div style="padding:15px; color:var(--dim); text-align:center;">No results found</div>`;
-            return;
-        }
-        
-        let html = '';
-        results.forEach((song) => {
-            let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-            let artist = song.artists?.primary?.[0]?.name.replace(/&quot;/g, '"').replace(/&amp;/g, '&') || "Unknown";
-            let cover = song.image?.length > 0 ? song.image[song.image.length - 1].url : "";
-            let dl = song.downloadUrl?.length > 0 ? song.downloadUrl[song.downloadUrl.length - 1].url : "";
 
-            // Only add tracks that have a direct playable audio link
-            if (dl) {
-                // Build the perfect song object that skips the audio resolver
-                let sObj = {
-                    t: title,
-                    a: artist,
-                    cover: cover,
-                    p: dl, // The direct audio link
-                    isOnline: true,
-                    needsAudioStream: false // THE MAGIC FLAG: Plays instantly!
-                };
+        if (results.length > 0) {
+            let html = "";
+            results.forEach(song => {
+                let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
                 
-                // Encode the song so we can safely inject it into the HTML click event
-                let safeSong = encodeURIComponent(JSON.stringify(sObj));
-                let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                let artist = "Unknown";
+                if (song.artists && song.artists.primary && song.artists.primary.length > 0) {
+                    artist = song.artists.primary[0].name.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+                }
+
+                let cover = song.image?.length > 0 ? song.image[song.image.length - 1].url : "";
                 
-                html += `
-                <div class="item" onclick="addOnlineSong('${safeSong}')" style="cursor:pointer; display:flex; align-items:center; padding:10px; border-bottom:1px solid #333;">
-                    <img src="${cover}" style="width:40px; height:40px; border-radius:4px; margin-right:12px; object-fit:cover;">
-                    <div class="item-left" style="overflow: hidden;">
-                        <div style="font-weight:bold; font-size:0.9rem; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeT}</div>
-                        <small style="color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block;">${safeA}</small>
+                // 🔥 NEW: Use the safe URL selector!
+                let downloadLink = getWorkingUrl(song.downloadUrl);
+
+                if (downloadLink) {
+                    let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeC = cover ? cover.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
+                    let safeDL = downloadLink.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                    html += `
+                    <div class="item" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}')" style="cursor:pointer; border-left: 3px solid #4cc2ff; align-items: center; padding: 8px 10px;">
+                    <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+                    <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
+                        <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                        <span class="material-icons-round" style="font-size:14px; color:var(--dim); vertical-align:middle; margin-right:4px;">cloud_download</span>${title}
+                        </div>
+                        <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                        ${artist}
+                        </div>
                     </div>
-                    <span class="material-icons-round" style="margin-left:auto; color:var(--accent); font-size:18px;">add_circle_outline</span>
-                </div>`;
-            }
-        });
-        
-        if (html === '') {
-             container.innerHTML = `<div style="padding:15px; color:var(--dim); text-align:center;">No playable results found</div>`;
+                    </div>`;
+                }
+            });
+            container.innerHTML = html || `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No playable streams found.</div>`;
         } else {
-             container.innerHTML = html;
+            container.innerHTML = `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No global results found.</div>`;
         }
     } catch (e) {
-        container.innerHTML = `<div style="padding:15px; color:red; text-align:center;">Search failed</div>`;
+        container.innerHTML = `<div style="padding:10px; color:#ff4c4c; text-align:center; font-size: 0.85rem;">Online Search Offline (${e.message}). Try again.</div>`;
     }
 }
 
-// Helper function to add the clicked YT Music song to your queue
+function addNextOnline(title, artist, cover, url) {
+    const newSong = { t: title, a: artist, p: url, isOnline: true, cover: cover, needsAudioStream: false };
+    const insertPos = queue.length === 0 ? 0 : curIdx + 1;
+    queue.splice(insertPos, 0, newSong);
+    
+    const sideSearch = document.getElementById('sidebar-search');
+    const immSearch = document.getElementById('imm-search');
+    const sideResults = document.getElementById('sidebar-search-results');
+    const immResults = document.getElementById('imm-search-results');
+
+    if (sideSearch) sideSearch.value = '';
+    if (immSearch) immSearch.value = '';
+    if (sideResults) sideResults.style.display = 'none';
+    if (immResults) immResults.style.display = 'none';
+
+    draw(); 
+    saveState();
+    
+    if (typeof switchToPlayerView === 'function') switchToPlayerView();
+    
+    // Play instantly
+    if (queue.length === 1) play(0);
+    else play(insertPos);
+}
+
+function play(i) {
+    if (i < 0 || i >= queue.length) return;
+
+    curIdx = i;
+    const s = queue[i];
+
+    document.getElementById('cur-t').innerText = s.t;
+    document.getElementById('cur-a').innerText = s.a;
+
+    currentSongId = s.id || s.p;
+    if (typeof updateToolIcons === 'function') updateToolIcons();
+    draw(); 
+    saveState();
+
+    if (typeof scrollToCurrentSong === 'function') scrollToCurrentSong();
+
+    if (s.isOnline) {
+        const coverEl = document.getElementById('album-cover');
+        if (s.cover) {
+            coverEl.src = s.cover;
+            coverEl.style.display = "block";
+            document.getElementById('bg-blur').style.backgroundImage = `url(${s.cover})`;
+        } else {
+            if (typeof fallbackArt === 'function') fallbackArt(s.t || 'Unknown');
+        }
+
+        // 🔥 USE THE NEW RETRY LOGIC!
+        tryPlayWithRetry(s, 0);
+
+    } else {
+        safePlay(encodeURI(`file://${s.p.replace(/\\/g, '/')}`));
+        if (typeof extractAlbumArt === 'function') extractAlbumArt(s);
+    }
+
+    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
+    if (typeof getLyrics === 'function') getLyrics(s);
+}
+
 // Helper function to add the clicked YT Music song to your queue
 function addOnlineSong(encodedSong) {
     const s = JSON.parse(decodeURIComponent(encodedSong));
@@ -387,30 +456,7 @@ function addOnlineSong(encodedSong) {
     play(insertPos);
 }
 
-function addNextOnline(title, artist, cover, url) {
-    const newSong = { t: title, a: artist, p: url, isOnline: true, cover: cover };
-    const insertPos = queue.length === 0 ? 0 : curIdx + 1;
-    queue.splice(insertPos, 0, newSong);
-    
-    const sideSearch = document.getElementById('sidebar-search');
-    const immSearch = document.getElementById('imm-search');
-    const immResults = document.getElementById('imm-search-results');
-    if (sideSearch) sideSearch.value = '';
-    if (immSearch) immSearch.value = '';
-    if (immResults) immResults.style.display = 'none';
 
-    draw(); saveState();
-    
-    if (queue.length === 1) play(0);
-
-    setTimeout(() => {
-    const qList = document.getElementById('queue-list');
-    const hList = document.getElementById('hover-queue-list');
-    if(qList && qList.children[insertPos]) qList.children[insertPos].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    if(hList && hList.children[insertPos]) hList.children[insertPos].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
-
-}
 
 function playNextSearch(index, targetId) {
     // 1. UI Cleanup - Clear inputs and hide results
@@ -913,7 +959,7 @@ function draw() {
     const html = queue.map((s, i) => {
     let icon = s.isOnline ? "cloud" : "drag_indicator";
     return `
-    <div class="item ${i===curIdx?'active':''}" draggable="true" ondragstart="dragStart(event, ${i})" ondragend="dragEnd(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="drop(event, ${i})" onclick="play(${i})">
+        <div class="item ${i===curIdx?'active':''}" data-type="queue-item" data-index="${i}" draggable="true" ondragstart="dragStart(event, ${i})" ondragend="dragEnd(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="drop(event, ${i})" onclick="play(${i})">
         <div class="item-left"><span class="material-icons-round drag-handle">${icon}</span> ${i+1}. ${s.t}</div>
         <div class="del-btn" onclick="event.stopPropagation(); queue.splice(${i}, 1); if(${i} < curIdx) curIdx--; else if(${i} === curIdx && queue.length > 0) play(curIdx >= queue.length ? 0 : curIdx); draw(); saveState();">✕</div>        </div>
     `}).join('');
@@ -925,136 +971,77 @@ function draw() {
     if(qList) qList.scrollTop = qScroll;
     if(hList) hList.scrollTop = hScroll;
 }
+function getWorkingUrl(downloadUrlArr) {
+    if (!downloadUrlArr || !Array.isArray(downloadUrlArr)) return "";
+
+    // Try best → worst (No forced proxy bypasses)
+    const order = ['320kbps', '160kbps', '96kbps', '48kbps'];
+
+    for (let q of order) {
+        const found = downloadUrlArr.find(x => x.quality === q);
+        if (found && found.url) return found.url;
+    }
+
+    // Fallback
+    return downloadUrlArr[0]?.url || "";
+}
+
+function safePlay(url) {
+    const audio = document.getElementById('player');
+    audio.pause();
+    audio.removeAttribute('src');  // 🔥 IMPORTANT (forces reset)
+    
+    setTimeout(() => {
+        audio.src = url;
+        audio.load();
+
+        audio.play().catch(e => {
+            console.error("Playback failed:", e);
+            // Ignore AbortError since safePlay purposely interrupts
+        });
+    }, 50);
+}
+
+function tryPlayWithRetry(song, attempt) {
+    const audio = document.getElementById('player');
+    
+    if (attempt > 2) {
+        console.error("All retries failed");
+        showToast("❌ Cannot play this track. Skipping...");
+        setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
+        return;
+    }
+
+    safePlay(song.p);
+
+    audio.onerror = async () => {
+        console.log("Stream failed, Retrying... Attempt:", attempt + 1);
+
+        try {
+            // REFETCH fresh URL directly from the API
+            let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(song.t + " " + song.a)}&limit=1`);
+            let json = await res.json();
+            let newSong = json.data?.results?.[0] || json.data?.songs?.results?.[0];
+
+            let newUrl = getWorkingUrl(newSong?.downloadUrl);
+
+            if (newUrl) {
+                song.p = newUrl;
+                saveState(); // Update the queue memory with the fresh link
+                tryPlayWithRetry(song, attempt + 1);
+            } else {
+                throw new Error("No URL");
+            }
+        } catch (e) {
+            console.error("Retry failed:", e);
+            showToast("❌ Playback failed. Skipping...");
+            setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
+        }
+    };
+}
 
 // MUST have the word 'async' here!
-let playSessionId = 0; // Prevents the "Glitchy Swipe" Race Condition
 
-async function play(i) {
-    if(i < 0 || i >= queue.length) return;
-    
-    playSessionId++; // Generate a new ticket for this specific song request
-    lastPreloadedIdx = -1;
-    const mySessionId = playSessionId; 
-
-    switchToPlayerView();
-    curIdx = i; const s = queue[i];
-    isUserScrolling = false;
-    document.getElementById('cur-t').innerText = s.t;
-    document.getElementById('cur-a').innerText = s.a;
-    
-    currentSongId = s.ytId || (s.a + " - " + s.t);
-    if (typeof updateToolIcons === 'function') updateToolIcons();
-    draw(); saveState();
-    
-    if (typeof scrollToCurrentSong === 'function') scrollToCurrentSong();
-    
-    const audio = document.getElementById('player');
-
-    if(s.isOnline) {
-        if (s.cover) {
-            document.getElementById('album-cover').src = s.cover;
-            document.getElementById('album-cover').style.display = "block";
-            document.getElementById('bg-blur').style.backgroundImage = `url(${s.cover})`;
-        } else {
-            if (typeof fallbackArt === 'function') fallbackArt(s.t || 'Unknown');
-        }
-
-        // Only fetch if we DON'T have a cached URL
-        if (s.needsAudioStream || !s.p || s.p.trim() === "") {
-            showToast(`Resolving audio for: ${s.t}...`);
-            let foundStream = false;
-
-            // 1. COBALT API (Fastest & Most Reliable)
-            if (s.ytId && !foundStream) {
-                try {
-                    let res = await fetch("https://co.wuk.sh/api/json", {
-                        method: "POST",
-                        headers: { "Accept": "application/json", "Content-Type": "application/json" },
-                        body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${s.ytId}`, isAudioOnly: true }),
-                        signal: AbortSignal.timeout(6000)
-                    });
-                    if (res.ok) {
-                        let json = await res.json();
-                        if (json && json.url) { s.p = json.url; foundStream = true; }
-                    }
-                } catch(e) {}
-            }
-
-            // 2. PIPED API FAILOVER (Mirrors)
-            if (!foundStream && s.ytId) {
-                const pipedServers = ["https://pipedapi.kavin.rocks", "https://pipedapi.smnz.de", "https://api.piped.projectsegfau.lt"];
-                for (const server of pipedServers) {
-                    try {
-                        let res = await fetch(`${server}/streams/${s.ytId}`, { signal: AbortSignal.timeout(4000) });
-                        if (res.ok) {
-                            let json = await res.json();
-                            let bestAudio = json.audioStreams?.find(st => st.mimeType?.includes("mp4") || st.mimeType?.includes("webm"));
-                            if (bestAudio?.url) { s.p = bestAudio.url; foundStream = true; break; }
-                        }
-                    } catch (e) {}
-                }
-            }
-
-            // 3. JIOSAAVN FALLBACK 
-            if (!foundStream) {
-                const saavnApis = [
-                    `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(s.a + " " + s.t)}&limit=1`,
-                    `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(s.t)}&limit=1` 
-                ];
-                for (const url of saavnApis) {
-                    try {
-                        let res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-                        let json = await res.json();
-                        let results = json.data?.results || [];
-                        if (results.length > 0 && results[0].downloadUrl?.length > 0) {
-                            s.p = results[0].downloadUrl[results[0].downloadUrl.length - 1].url;
-                            foundStream = true; break;
-                        }
-                    } catch (e) {}
-                }
-            }
-
-            // RACE CONDITION CHECK: Did the user swipe to a new song while we were downloading?
-            // If yes, abort this function entirely so it doesn't hijack the player!
-            if (mySessionId !== playSessionId) return; 
-
-            // 4. ANTI-CRASH CHECK
-            if (!foundStream || !s.p || s.p.trim() === "" || s.p.includes("index.html")) {
-                showToast(`Audio unavailable. Skipping...`);
-                audio.removeAttribute('src'); 
-                setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
-                return; 
-            }
-            
-            // SAVE IT! So next time you click it, it loads instantly!
-            s.needsAudioStream = false;
-            saveState();
-        }
-
-        // RACE CONDITION CHECK 2: Just to be safe before hitting play
-        if (mySessionId !== playSessionId) return;
-
-        // 5. ACTUALLY PLAY THE SONG 
-        audio.src = s.p;
-        audio.load();
-        audio.play().catch(e => {
-            console.error("Playback error:", e);
-            audio.removeAttribute('src');
-            setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
-        });
-
-    } else {
-        if (s.p && s.p.trim() !== "") {
-            audio.src = encodeURI(`file://${s.p.replace(/\\/g, '/')}`);
-            audio.load();
-            audio.play().catch(e => console.error(e));
-            if (typeof extractAlbumArt === 'function') extractAlbumArt(s); 
-        }
-    }
-    
-    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
-    if (typeof getLyrics === 'function') getLyrics(s);
-}  
 
 function extractAlbumArt(song) {
     const coverImg = document.getElementById('album-cover');
@@ -1536,29 +1523,7 @@ function show(lrc) {
 
 audio.addEventListener('play', () => document.getElementById('p-icon').innerText = 'pause');
 audio.addEventListener('pause', () => document.getElementById('p-icon').innerText = 'play_arrow');
-audio.addEventListener('error', () => {
-    console.error('Audio playback error', audio.error, audio.src);
-    
-    // 1. Stop the infinite index.html crash loop!
-    if (!audio.src || audio.src.includes("index.html") || audio.src === window.location.href) {
-        return; 
-    }
 
-    // 2. Auto-Heal Expired YouTube Links!
-    const s = queue[curIdx];
-    if (s && s.isOnline && s.ytId && s.p && !audio.src.includes("saavn")) {
-        console.log("YouTube link likely expired. Re-fetching fresh audio...");
-        s.p = ""; // Clear the dead URL
-        s.needsAudioStream = true; // Force a fresh fetch
-        saveState();
-        play(curIdx); // Re-trigger play seamlessly
-        return;
-    }
-    
-    // 3. If it's truly broken, skip.
-    showToast('Audio stream failed. Skipping...');
-    if (queue.length > 1) playNext();
-});
 
 let hasAutoSwitchedToImmersive = false;
 
@@ -1668,7 +1633,11 @@ audio.ontimeupdate = () => {
     }
     }
 };
-document.getElementById('pb').onclick = (e) => audio.currentTime = (e.offsetX / e.target.clientWidth) * audio.duration;
+document.getElementById('pb').onclick = (e) => {
+    if (audio.duration && isFinite(audio.duration)) {
+        audio.currentTime = (e.offsetX / e.target.clientWidth) * audio.duration;
+    }
+};
 
 // Double click background to toggle immersive view
 // --- CLICK AND HOLD (GRAB) TO TOGGLE ---
@@ -1889,12 +1858,13 @@ async function populatePlaylistCarousel(query, containerId) {
                 let title = (pl.title || pl.name || "Unknown").replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 let cover = pl.image?.length > 0 ? pl.image[pl.image.length - 1].url : "";
                 
-                html += `
-                <div class="song-card" style="border-radius: 20px; background: rgba(0,0,0,0.4);" onclick="loadSaavnPlaylist('${pl.id}', '${title}')">
-                    <img src="${cover}" style="border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.6);">
-                    <div class="title" style="text-align: center;">${title}</div>
-                    <div class="artist" style="text-align: center;">${pl.songCount || 'Mix'} Tracks</div>
-                </div>`;
+                // Inside populatePlaylistCarousel(), change the HTML generation to this:
+html += `
+<div class="song-card" data-type="playlist" data-id="${pl.id}" data-title="${title}" style="border-radius: 20px; background: rgba(0,0,0,0.4);" onclick="loadSaavnPlaylist('${pl.id}', '${title}')">
+    <img src="${cover}" style="border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.6);">
+    <div class="title" style="text-align: center;">${title}</div>
+    <div class="artist" style="text-align: center;">${pl.songCount || 'Mix'} Tracks</div>
+</div>`;
             });
             container.innerHTML = html;
         }
@@ -1927,10 +1897,20 @@ async function loadSaavnPlaylist(id, titleName) {
 }
 
 function playDirectlyFromHome(title, artist, cover, url) {
-    const newSong = { t: title, a: artist, p: url, isOnline: true, cover: cover };
+    const newSong = { 
+        t: title, 
+        a: artist, 
+        p: normalizeSaavnUrl(url), 
+        isOnline: true, 
+        cover: cover 
+    };
     const insertPos = queue.length === 0 ? 0 : curIdx + 1;
     queue.splice(insertPos, 0, newSong);
-    saveState(); play(insertPos); switchToPlayerView();
+    
+    saveState(); 
+    switchToPlayerView();
+    play(insertPos); 
+    
     const sideSearch = document.getElementById('sidebar-search-results');
     const immSearch = document.getElementById('imm-search-results');
     if (sideSearch) sideSearch.style.display = 'none';
@@ -2080,6 +2060,7 @@ async function openPlaylist(playlistId, titleName) {
 
         return {
             t: cleanTitle, 
+            rawTitle: song.name, 
             a: safeArtist, 
             p: '',
             cover: safeCover,
@@ -2136,161 +2117,7 @@ function playSupermixSong(title, artist, cover) {
     saveState(); draw(); switchView('player'); play(insertPos);
 }
 
-// ==========================================
-// --- 5. CUSTOM RIGHT CLICK & LOCAL PLAYLIST ---
-// ==========================================
 
-document.addEventListener('contextmenu', (e) => {
-    const card = e.target.closest('.song-card');
-    if (card && card.getAttribute('data-type') === 'song') {
-        e.preventDefault();
-        ctxTargetSong = {
-            t: card.getAttribute('data-title'), a: card.getAttribute('data-artist'),
-            cover: card.getAttribute('data-cover'), p: card.getAttribute('data-url'),
-            isOnline: true, needsAudioStream: false
-        };
-        ctxMenu.style.left = `${e.pageX}px`; ctxMenu.style.top = `${e.pageY}px`;
-        ctxMenu.classList.add('active');
-    }
-});
-
-// Safe Click Listener (Fixes Line 1955 Crash)
-document.addEventListener('click', (e) => { 
-    if (ctxMenu && !e.target.closest('#custom-context-menu')) {
-        ctxMenu.classList.remove('active'); 
-    }
-});
-
-// ==========================================
-// --- CRASH-PROOF MENU ACTIONS ---
-// ==========================================
-
-// We use 'if (element)' so the app NEVER crashes, even if HTML is missing!
-const btnPlayNext = document.getElementById('ctx-play-next');
-if (btnPlayNext) {
-    btnPlayNext.onclick = () => {
-        if (!ctxTargetSong) return;
-        queue.splice(queue.length === 0 ? 0 : curIdx + 1, 0, ctxTargetSong);
-        if (typeof draw === 'function') draw(); 
-        if (typeof saveState === 'function') saveState(); 
-        showToast(`Added "${ctxTargetSong.t}" to play next!`);
-        ctxMenu.classList.remove('active');
-    };
-}
-
-const btnAddBottom = document.getElementById('ctx-add-bottom');
-if (btnAddBottom) {
-    btnAddBottom.onclick = () => {
-        if (!ctxTargetSong) return;
-        queue.push(ctxTargetSong);
-        if (typeof draw === 'function') draw(); 
-        if (typeof saveState === 'function') saveState(); 
-        showToast(`Added "${ctxTargetSong.t}" to bottom!`);
-        ctxMenu.classList.remove('active');
-    };
-}
-
-const btnSaveLocal = document.getElementById('ctx-save-local');
-if (btnSaveLocal) {
-    btnSaveLocal.onclick = () => {
-        if (!ctxTargetSong) return;
-        let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
-        if (!localPl.some(s => s.t === ctxTargetSong.t)) {
-            localPl.push(ctxTargetSong);
-            localStorage.setItem('myLocalPlaylist', JSON.stringify(localPl));
-            showToast("Saved to Local Favorites! ❤️");
-        } else showToast("Already in your favorites!");
-        ctxMenu.classList.remove('active');
-    };
-}
-
-const btnShare = document.getElementById('ctx-share');
-if (btnShare) {
-    btnShare.onclick = () => {
-        if (!ctxTargetSong) return;
-        navigator.clipboard.writeText(`I'm listening to ${ctxTargetSong.t} by ${ctxTargetSong.a}!`);
-        showToast("Share text copied!");
-        ctxMenu.classList.remove('active');
-    };
-}
-
-function openLocalPlaylist() {
-    let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
-    document.body.classList.remove('player-mode'); switchView('playlist');
-    document.getElementById('pl-detail-title').innerText = "Local Favorites ❤️";
-    document.getElementById('pl-track-count').innerText = localPl.length;
-    document.getElementById('pl-detail-img').src = localPl.length > 0 ? localPl[0].cover : 'https://via.placeholder.com/230';
-    
-    const tracklistEl = document.getElementById('playlist-tracklist');
-    if (localPl.length === 0) {
-        tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);">Your favorites list is empty.<br>Right-click songs on the Explore page to add them!</div>`;
-        return;
-    }
-    currentLoadedPlaylist = localPl; 
-    let html = '';
-    localPl.forEach((song, i) => {
-        html += `<div class="track-row" onclick="playFromPlaylist(${i})">
-            <div class="track-num">${i + 1}</div>
-            <div style="display:flex; flex-direction:column; overflow:hidden;">
-                <span style="color:white; font-weight:bold; white-space:nowrap; text-overflow:ellipsis;">${song.t}</span>
-                <span style="color:var(--dim); font-size:0.85rem; white-space:nowrap; text-overflow:ellipsis;">${song.a}</span>
-            </div>
-            <span class="material-icons-round" style="color:#4cc2ff; font-size:18px;">favorite</span>
-        </div>`;
-    });
-    tracklistEl.innerHTML = html;
-}
-
-// ==========================================
-// --- NEW: MANUAL PLAYLIST IMPORTER ---
-// ==========================================
-
-async function importYTPlaylist() {
-    const input = document.getElementById('new-pl-input');
-    const url = input.value.trim();
-    if(!url) return;
-
-    // Extract the Playlist ID from the URL
-    let match = url.match(/[?&]list=([^&#]+)/) || url.match(/^([a-zA-Z0-9_-]+)$/);
-    if(!match) {
-        showToast("Invalid YouTube Playlist URL!");
-        return;
-    }
-    const plId = match[1];
-
-    showToast("Scraping Playlist Data...");
-    const btn = document.querySelector('button[onclick="importYTPlaylist()"]');
-    if (btn) btn.innerText = "Syncing...";
-
-    try {
-        // Fetch public metadata (No login required!)
-        const data = await ipcRenderer.invoke('get-yt-playlist', plId);
-        
-        if(!data || !data.songs) {
-            showToast("Failed to fetch. Is the playlist public?");
-            if (btn) btn.innerText = "+ Add Playlist";
-            return;
-        }
-
-        let saved = JSON.parse(localStorage.getItem('customYTPlaylists') || '[]');
-        if(saved.some(p => p.id === plId)) {
-            showToast("Playlist already added!");
-            input.value = '';
-            if (btn) btn.innerText = "+ Add Playlist";
-            return;
-        }
-
-        saved.push({ id: plId, title: data.name || data.title || "Custom Playlist" });
-        localStorage.setItem('customYTPlaylists', JSON.stringify(saved));
-        
-        input.value = '';
-        showToast(`Saved "${data.name || data.title || 'Playlist'}"!`);
-        renderSidebarPlaylists(); 
-    } catch (e) {
-        showToast("Scraping Error.");
-    }
-    if (btn) btn.innerText = "+ Add Playlist";
-}
 
 function renderSidebarPlaylists() {
     const container = document.getElementById('sidebar-playlists');
@@ -2430,77 +2257,49 @@ let lastPreloadedIdx = -1;
 
 async function preloadNextSong() {
     const nextIdx = curIdx + 1;
-    if (nextIdx >= queue.length) return; // Stop if we are at the end of the playlist
-    
-    // Prevent spamming the API if we already preloaded this song
+    if (nextIdx >= queue.length) return; 
     if (lastPreloadedIdx === nextIdx) return; 
 
     const nextSong = queue[nextIdx];
     
-    // If it's a local file, or if we already have the URL saved, do nothing!
     if (!nextSong.isOnline || (!nextSong.needsAudioStream && nextSong.p)) return; 
 
-    lastPreloadedIdx = nextIdx; // Lock it so it only runs once
+    lastPreloadedIdx = nextIdx;
     console.log(`[Preloader] Silently fetching audio for next track: ${nextSong.t}...`);
 
     let foundStream = false;
 
-    // 1. COBALT
-    if (nextSong.ytId && !foundStream) {
+    const saavnApis = [
+        `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(nextSong.a + " " + nextSong.t)}&limit=1`,
+        `https://saavn.dev/api/search/songs?query=${encodeURIComponent(nextSong.t)}&limit=1`
+    ];
+    for (const url of saavnApis) {
         try {
-            let res = await fetch("https://co.wuk.sh/api/json", {
-                method: "POST",
-                headers: { "Accept": "application/json", "Content-Type": "application/json" },
-                body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${nextSong.ytId}`, isAudioOnly: true }),
-                signal: AbortSignal.timeout(6000)
-            });
-            if (res.ok) {
-                let json = await res.json();
-                if (json && json.url) { nextSong.p = json.url; foundStream = true; }
-            }
-        } catch(e) {}
-    }
-
-    // 2. PIPED
-    if (!foundStream && nextSong.ytId) {
-        const pipedServers = ["https://pipedapi.kavin.rocks", "https://pipedapi.smnz.de", "https://api.piped.projectsegfau.lt"];
-        for (const server of pipedServers) {
-            try {
-                let res = await fetch(`${server}/streams/${nextSong.ytId}`, { signal: AbortSignal.timeout(4000) });
-                if (res.ok) {
-                    let json = await res.json();
-                    let bestAudio = json.audioStreams?.find(st => st.mimeType?.includes("mp4") || st.mimeType?.includes("webm"));
-                    if (bestAudio?.url) { nextSong.p = bestAudio.url; foundStream = true; break; }
-                }
-            } catch (e) {}
-        }
-    }
-
-    // 3. SAAVN
-    if (!foundStream) {
-        const saavnApis = [
-            `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(nextSong.a + " " + nextSong.t)}&limit=1`,
-            `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(nextSong.t)}&limit=1`
-        ];
-        for (const url of saavnApis) {
-            try {
-                let res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-                let json = await res.json();
-                let results = json.data?.results || [];
-                if (results.length > 0 && results[0].downloadUrl?.length > 0) {
-                    nextSong.p = results[0].downloadUrl[results[0].downloadUrl.length - 1].url;
+            let res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+            if (!res.ok) continue;
+            let json = await res.json();
+            let results = json.data?.results || json.data?.songs?.results || [];
+            
+            if (results.length > 0 && results[0].downloadUrl?.length > 0) {
+                let dlArray = results[0].downloadUrl;
+                
+                // THE 160kbps FIREWALL BYPASS:
+                let dlObj = dlArray.find(u => u.quality === '160kbps') || dlArray[dlArray.length > 1 ? dlArray.length - 2 : 0];
+                
+                if (dlObj && dlObj.url) {
+                    nextSong.p = dlObj.url.replace('aac.saavncdn.com', 'c.saavncdn.com');
                     foundStream = true; break;
                 }
-            } catch (e) {}
-        }
+            }
+        } catch (e) {}
     }
 
     if (foundStream && nextSong.p) {
-        nextSong.needsAudioStream = false; // Mark it as ready!
+        nextSong.needsAudioStream = false;
         saveState();
         console.log(`[Preloader] Success! Next song is locked and loaded.`);
     } else {
-        lastPreloadedIdx = -1; // If it fails, reset it so play() can try again normally
+        lastPreloadedIdx = -1;
     }
 }
 
@@ -2531,59 +2330,106 @@ if (ctxMenu) {
 // --- 5. CUSTOM RIGHT CLICK & LOCAL PLAYLIST ---
 // ==========================================
 
+// We store the target globally on the window object so inline HTML clicks can find it!
+window.ctxTargetSong = null;
 
-// 1. Right-Click Listener
+// 1. Upgraded Right-Click Listener (Songs, Playlists, AND Queue)
 document.addEventListener('contextmenu', (e) => {
     const card = e.target.closest('.song-card');
+    const queueItem = e.target.closest('.item[data-type="queue-item"]'); // NEW: Detects queue clicks!
     
-    if (card && card.getAttribute('data-type') === 'song') {
+    // DYNAMICALLY grab the menu
+    const menu = document.getElementById('custom-context-menu');
+    if (!menu) return;
+
+    // --- IF IT IS A HOME SCREEN SONG OR PLAYLIST ---
+    if (card) {
+        e.preventDefault(); 
+        
+        if (card.getAttribute('data-type') === 'song') {
+            window.ctxTargetSong = {
+                t: card.getAttribute('data-title'), 
+                a: card.getAttribute('data-artist'),
+                cover: card.getAttribute('data-cover'), 
+                p: card.getAttribute('data-url'),
+                ytId: card.getAttribute('data-ytid'), 
+                isOnline: true, 
+                needsAudioStream: !card.getAttribute('data-url')
+            };
+
+            menu.innerHTML = `
+                <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
+                <div class="context-item" onclick="addToQueueDirect(window.ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
+                <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
+            `;
+        } else if (card.getAttribute('data-type') === 'playlist') {
+            const plId = card.getAttribute('data-id');
+            const plTitle = card.getAttribute('data-title');
+            menu.innerHTML = `
+                <div class="context-item" onclick="loadSaavnPlaylist('${plId}', '${plTitle}')"><span class="material-icons-round">play_circle</span> Load Entire Playlist</div>
+            `;
+        }
+        
+        menu.style.left = `${e.pageX}px`; 
+        menu.style.top = `${e.pageY}px`;
+        menu.style.display = 'block'; 
+    }
+    // --- IF IT IS A QUEUE ITEM ---
+    else if (queueItem) {
         e.preventDefault();
         
-        // Grab all the data needed to actually play the song
-        ctxTargetSong = {
-            t: card.getAttribute('data-title'), 
-            a: card.getAttribute('data-artist'),
-            cover: card.getAttribute('data-cover'), 
-            p: card.getAttribute('data-url'),
-            ytId: card.getAttribute('data-ytid'), // MUST HAVE THIS for YouTube
-            isOnline: true, 
-            needsAudioStream: !card.getAttribute('data-url')
-        };
+        // Find exactly which song they right-clicked in the queue array
+        const qIdx = parseInt(queueItem.getAttribute('data-index'));
+        const song = queue[qIdx];
+        if (!song) return;
 
-        // Inject the buttons so they know exactly which song to pass to the helpers!
-        ctxMenu.innerHTML = `
-            <div class="context-item" onclick="playNextDirect(ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
-            <div class="context-item" onclick="addToQueueDirect(ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
-            <div class="context-item" onclick="openPlaylistPicker(ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
+        window.ctxTargetSong = song;
+
+        menu.innerHTML = `
+            <div class="context-item" onclick="play(${qIdx}); document.getElementById('custom-context-menu').style.display='none';"><span class="material-icons-round">play_arrow</span> Play Now</div>
+            <div class="context-item" onclick="removeFromQueue(${qIdx})"><span class="material-icons-round">remove_circle_outline</span> Remove from Queue</div>
+            <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
+            <div class="context-item" onclick="shareTrackDirect(window.ctxTargetSong)"><span class="material-icons-round">share</span> Share Link</div>
         `;
+        
+        // Keep the menu on-screen if they click near the bottom right edge
+        const menuHeight = 180; 
+        let yPos = e.pageY;
+        if (yPos + menuHeight > window.innerHeight) yPos = window.innerHeight - menuHeight;
 
-        // Position it and force it to be visible using 'block'
-        ctxMenu.style.left = `${e.pageX}px`; 
-        ctxMenu.style.top = `${e.pageY}px`;
-        ctxMenu.style.display = 'block'; 
+        menu.style.left = `${e.pageX - 10}px`; 
+        menu.style.top = `${yPos}px`;
+        menu.style.display = 'block'; 
     }
 });
 
 // 2. Safe Click Listener (Hide Menu)
 document.addEventListener('click', (e) => { 
-    if (ctxMenu && !e.target.closest('#custom-context-menu')) {
-        ctxMenu.style.display = 'none'; // Replaced classList.remove with display = 'none'
+    const menu = document.getElementById('custom-context-menu');
+    if (menu && !e.target.closest('#custom-context-menu')) {
+        menu.style.display = 'none'; 
     }
 });
 
 // 3. Context Menu Action Helpers
 function playNextDirect(song) {
     queue.splice(curIdx + 1, 0, song);
-    draw(); saveState();
-    showToast(`"${song.t}" will play next!`);
-    ctxMenu.style.display = 'none';
+    if (typeof draw === 'function') draw(); 
+    if (typeof saveState === 'function') saveState();
+    if (typeof showToast === 'function') showToast(`"${song.t}" will play next!`);
+    
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
 }
 
 function addToQueueDirect(song) {
     queue.push(song);
-    draw(); saveState();
-    showToast(`"${song.t}" added to bottom of queue`);
-    ctxMenu.style.display = 'none';
+    if (typeof draw === 'function') draw(); 
+    if (typeof saveState === 'function') saveState();
+    if (typeof showToast === 'function') showToast(`"${song.t}" added to bottom of queue`);
+    
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
 }
 
 function openPlaylistPicker(song) {
@@ -2592,11 +2438,33 @@ function openPlaylistPicker(song) {
     if (!localPl.some(s => s.t === song.t)) {
         localPl.push(song);
         localStorage.setItem('myLocalPlaylist', JSON.stringify(localPl));
-        showToast("Added to Local Favorites! ❤️");
+        if (typeof showToast === 'function') showToast("Added to Local Favorites! ❤️");
     } else {
-        showToast("Already in favorites!");
+        if (typeof showToast === 'function') showToast("Already in favorites!");
     }
-    ctxMenu.style.display = 'none';
+    
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
+}
+
+function removeFromQueue(index) {
+    queue.splice(index, 1);
+    if (index < curIdx) curIdx--;
+    else if (index === curIdx && queue.length > 0) play(curIdx >= queue.length ? 0 : curIdx);
+    
+    if (typeof draw === 'function') draw(); 
+    if (typeof saveState === 'function') saveState();
+    
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
+}
+
+function shareTrackDirect(song) {
+    navigator.clipboard.writeText(`Listening to ${song.t} by ${song.a} on Pro Media Player!`);
+    if (typeof showToast === 'function') showToast("Share text copied!");
+    
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
 }
 
 function openLocalPlaylist() {
@@ -2624,5 +2492,55 @@ function openLocalPlaylist() {
         </div>`;
     });
     tracklistEl.innerHTML = html;
+}
+// ==========================================
+// --- NEW: MANUAL PLAYLIST IMPORTER ---
+// ==========================================
+
+async function importYTPlaylist() {
+    const input = document.getElementById('new-pl-input');
+    const url = input.value.trim();
+    if(!url) return;
+
+    // Extract the Playlist ID from the URL
+    let match = url.match(/[?&]list=([^&#]+)/) || url.match(/^([a-zA-Z0-9_-]+)$/);
+    if(!match) {
+        showToast("Invalid YouTube Playlist URL!");
+        return;
+    }
+    const plId = match[1];
+
+    showToast("Scraping Playlist Data...");
+    const btn = document.querySelector('button[onclick="importYTPlaylist()"]');
+    if (btn) btn.innerText = "Syncing...";
+
+    try {
+        // Fetch public metadata (No login required!)
+        const data = await ipcRenderer.invoke('get-yt-playlist', plId);
+        
+        if(!data || !data.songs) {
+            showToast("Failed to fetch. Is the playlist public?");
+            if (btn) btn.innerText = "+ Add Playlist";
+            return;
+        }
+
+        let saved = JSON.parse(localStorage.getItem('customYTPlaylists') || '[]');
+        if(saved.some(p => p.id === plId)) {
+            showToast("Playlist already added!");
+            input.value = '';
+            if (btn) btn.innerText = "+ Add Playlist";
+            return;
+        }
+
+        saved.push({ id: plId, title: data.name || data.title || "Custom Playlist" });
+        localStorage.setItem('customYTPlaylists', JSON.stringify(saved));
+        
+        input.value = '';
+        showToast(`Saved "${data.name || data.title || 'Playlist'}"!`);
+        renderSidebarPlaylists(); 
+    } catch (e) {
+        showToast("Scraping Error.");
+    }
+    if (btn) btn.innerText = "+ Add Playlist";
 }
 //yo

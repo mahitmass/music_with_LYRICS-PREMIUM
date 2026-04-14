@@ -343,24 +343,6 @@ body.retry-mode #retry-overlay { display: flex; opacity: 1; transform: translate
 .q-toggle-half.active { background: rgba(76,194,255,0.15); color: var(--accent); }
 .q-toggle-half .material-icons-round { font-size: 18px; }
 
-/* =========================================
-   NEW: RIGHT-CLICK CONTEXT MENU
-   ========================================= */
-.context-menu {
-    display: none; position: fixed; z-index: 10000; width: 220px;
-    background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(25px);
-    border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
-    box-shadow: 0 15px 35px rgba(0,0,0,0.8); padding: 8px; flex-direction: column;
-}
-.context-menu.active { display: flex; }
-.context-item {
-    display: flex; align-items: center; gap: 12px; padding: 10px 15px;
-    color: #e0e0e0; font-size: 0.9rem; font-weight: 500; cursor: pointer;
-    border-radius: 8px; transition: 0.2s;
-}
-.context-item .material-icons-round { font-size: 18px; color: var(--dim); transition: 0.2s; }
-.context-item:hover { background: rgba(76,194,255,0.15); color: #fff; }
-.context-item:hover .material-icons-round { color: var(--accent); }
 
 .nav-back-btn {
     position: absolute; top: 30px; left: 30px; z-index: 100;

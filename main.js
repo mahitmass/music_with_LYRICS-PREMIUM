@@ -2,12 +2,8 @@ const { app, BrowserWindow, powerSaveBlocker, globalShortcut, ipcMain, session }
 const path = require('path');
 const fs = require('fs');
 
-const YTMod = require('ytmusic-api');
-const YTMusic = YTMod.default || YTMod; 
-const ytmusic = new YTMusic();
+// We have removed YTMod and ytdl to stop the 403 Forbidden crashes
 
-// The new direct YouTube audio stream extractor
-const ytdl = require('@distube/ytdl-core');
 
 app.commandLine.appendSwitch('js-flags', '--optimize_for_size --max_old_space_size=256');
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -19,6 +15,13 @@ if (!gotTheLock) {
   app.quit(); 
 } else {
   app.whenReady().then(async () => {
+    // Forces the app to use Cloudflare & Google DNS, ignoring the local Wi-Fi entirely.
+    app.configureHostResolver({
+      secureDnsMode: 'secure',
+      secureDnsServers: [
+        'https://dns.google/dns-query'
+      ]
+    });
     
     // Destroy poisoned cookies for clean anonymous scraping
     const cookiePath = path.join(app.getPath('userData'), 'yt-cookies.json');
@@ -26,55 +29,8 @@ if (!gotTheLock) {
         try { fs.unlinkSync(cookiePath); } catch(e) {}
     }
 
-    try {
-        await ytmusic.initialize();
-        console.log("YT Music API Initialized!");
-    } catch(err) {
-        console.error("YT Init Error:", err);
-    }
+    
 
-    // ==========================================
-    // --- DIRECT YOUTUBE AUDIO STREAMER ---
-    // ==========================================
-    ipcMain.handle('get-yt-audio', async (event, videoId) => {
-        try {
-            console.log("Fetching direct audio stream for:", videoId);
-            // Get all video info and available formats
-            const info = await ytdl.getInfo(videoId);
-            // Let the package pick the best audio-only stream
-            const format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
-            
-            console.log("Audio Stream URL found!");
-            return format.url; // This is the raw playback URL!
-        } catch (error) {
-            console.error("YT Audio Fetch Error:", error.message);
-            return null;
-        }
-    });
-
-    // ==========================================
-    // --- YOUTUBE MUSIC SEARCH HANDLER ---
-    // ==========================================
-    ipcMain.handle('yt-search', async (event, query) => {
-        try {
-            console.log("Searching YT Music for:", query);
-            const results = await ytmusic.searchSongs(query);
-            
-            // Format the results so renderer.js understands them
-            return results.slice(0, 15).map(s => ({
-                t: s.name,
-                a: s.artist.name,
-                cover: s.thumbnails.length > 0 ? s.thumbnails[s.thumbnails.length - 1].url : '',
-                ytId: s.videoId,
-                isOnline: true,
-                needsAudioStream: true,
-                p: '' // Blank URL (will be fetched by Piped API later)
-            }));
-        } catch (e) {
-            console.error("YT Search Error:", e);
-            return [];
-        }
-    });
 
     // ==========================================
     // --- INVINCIBLE INFINITE SCRAPER ---
@@ -115,7 +71,7 @@ if (!gotTheLock) {
         // PLAN B: If blocked or parsing fails, try Piped API Mirrors
         if (!data) {
             console.log("Engaging Plan B (Piped Mirrors)...");
-            const pipedServers = ["https://pipedapi.kavin.rocks", "https://pipedapi.smnz.de", "https://api.piped.projectsegfau.lt", "https://pipedapi.tokhmi.xyz"];
+const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projectsegfau.lt", "https://piped-api.lunar.icu", "https://watchapi.whatever.social"];
             let pipedData = null;
             
             for (const server of pipedServers) {
@@ -130,11 +86,17 @@ if (!gotTheLock) {
             
             if (!pipedData) throw new Error("All Piped API servers are offline");
             
-            let songs = pipedData.relatedStreams.map(s => ({
-                name: s.title,
-                artists: [{ name: s.uploaderName }],
-                thumbnails: [{ url: s.thumbnail }]
-            }));
+            let songs = pipedData.relatedStreams.map(s => {
+    // Piped usually stores the video ID in the 'url' string like "/watch?v=XXXXXX"
+    let videoId = s.url ? s.url.split('v=')[1] : null; 
+    
+    return {
+        name: s.title,
+        artists: [{ name: s.uploaderName }],
+        thumbnails: [{ url: s.thumbnail }],
+        ytId: videoId // MUST include this so the renderer knows what to play!
+    };
+});
             return { title: pipedData.name || title, songs };
         }
 
