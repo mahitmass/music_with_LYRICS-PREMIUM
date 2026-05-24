@@ -1,6 +1,8 @@
 const { app, BrowserWindow, powerSaveBlocker, globalShortcut, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+const { fork } = require('child_process');
 
 // We have removed YTMod and ytdl to stop the 403 Forbidden crashes
 
@@ -10,6 +12,30 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 let win;
 const gotTheLock = app.requestSingleInstanceLock();
+
+function downloadAudioToTemp(audioPath) {
+  return new Promise((resolve, reject) => {
+    const tempFilePath = path.join(app.getPath('temp'), 'lyrics-generation-target.mp4');
+
+    try {
+      if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+    } catch (e) {}
+
+    const file = fs.createWriteStream(tempFilePath);
+    https.get(audioPath, (response) => {
+      if (response.statusCode !== 200) {
+        file.close(() => reject(new Error(`Failed to download: ${response.statusCode}`)));
+        return;
+      }
+
+      response.pipe(file);
+      file.on('finish', () => file.close(() => resolve(tempFilePath)));
+    }).on('error', (err) => {
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+      reject(err);
+    });
+  });
+}
 
 if (!gotTheLock) {
   app.quit(); 
@@ -192,6 +218,109 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
       }
     });
 
+    // ==========================================
+    // --- TASK 2: ISOLATED AI TRANSCRIPTION HANDLER ---
+    // ==========================================
+    ipcMain.handle('transcribe-audio', async (event, audioPath) => {
+      let tempFilePath = null;
+      try {
+        let transcribePath = audioPath;
+
+        // If it's a URL, download it to a temporary file
+        if (audioPath.startsWith('http')) {
+          console.log("Downloading online stream for AI transcription...");
+          tempFilePath = await downloadAudioToTemp(audioPath);
+          transcribePath = tempFilePath;
+        }
+
+        console.log("Starting isolated Whisper transcription for:", transcribePath);
+        
+        // Task 2: Isolate ShellJS and Whisper-Node in a completely detached child process
+        // This prevents the Electron main thread from crashing due to native compilation issues
+        return await new Promise((resolve) => {
+          // Path to a temporary runner script we'll create to isolate whisper
+          const runnerPath = path.join(app.getPath('temp'), 'whisper-runner.js');
+          
+          // Write the runner script
+          const runnerCode = `
+            try {
+              const shell = require('shelljs');
+              shell.config.execPath = process.execPath;
+              const whisper = require('whisper-node');
+              
+              whisper("${transcribePath.replace(/\\/g, '\\\\')}", {
+                modelName: "tiny.en",
+                whisperOptions: { language: 'en', gen_file_lrc: false, gen_file_txt: false }
+              }).then(transcript => {
+                let lrcText = "";
+                if (Array.isArray(transcript)) {
+                  transcript.forEach(line => {
+                    const ms = parseFloat(line.start);
+                    const m = Math.floor(ms / 60).toString().padStart(2, '0');
+                    const s = (ms % 60).toFixed(2).padStart(5, '0');
+                    lrcText += \`[$\{m}:\${s}] \${line.text.trim()}\\n\`;
+                  });
+                }
+                process.send({ status: 'success', lrc: lrcText });
+              }).catch(err => {
+                process.send({ status: 'error', message: err.message });
+              });
+            } catch (err) {
+              process.send({ status: 'error', message: "Compilation/Load error: " + err.message });
+            }
+          `;
+          
+          fs.writeFileSync(runnerPath, runnerCode);
+          
+          // Fork the process so it runs completely detached from the main Electron thread
+          const child = fork(runnerPath, [], {
+            env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+            stdio: ['pipe', 'pipe', 'pipe', 'ipc']
+          });
+          
+          child.on('message', (msg) => {
+            resolve(msg);
+            try { fs.unlinkSync(runnerPath); } catch(e) {}
+            child.kill();
+          });
+          
+          child.on('error', (err) => {
+            resolve({ 
+              status: 'error', 
+              success: false, 
+              error: "Child process failed to start. Local AI engine compilation failed.",
+              details: err.message 
+            });
+            try { fs.unlinkSync(runnerPath); } catch(e) {}
+          });
+          
+          child.on('exit', (code) => {
+            if (code !== 0) {
+              resolve({ 
+                status: 'error', 
+                success: false, 
+                error: "AI engine crashed unexpectedly. Please install build-essential tools."
+              });
+            }
+          });
+        });
+
+      } catch (error) {
+        console.error("AI Transcription Error:", error);
+        return { 
+          status: 'error', 
+          success: false, 
+          error: "Failed to download or process audio stream.",
+          details: error.message 
+        };
+      } finally {
+        // Task 2: Clean up temp file
+        if (tempFilePath && fs.existsSync(tempFilePath)) {
+          try { fs.unlinkSync(tempFilePath); } catch(e) { console.error("Temp file cleanup failed:", e); }
+        }
+      }
+    });
+
     win = new BrowserWindow({
       width: 1250, height: 850, autoHideMenuBar: true, title: "Pro Media Player", icon: __dirname + '/icon.ico',
       webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }
@@ -199,6 +328,19 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
 
     win.loadFile('index.html');
     powerSaveBlocker.start('prevent-app-suspension'); 
+
+    // Handle second instance (restore window and handle file args)
+    app.on('second-instance', (event, commandLine) => {
+      if (win) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+        
+        const filePath = commandLine.pop();
+        if (filePath && filePath.endsWith('.mp3')) {
+          win.webContents.send('open-external-file', filePath);
+        }
+      }
+    });
     
     // RESTORED KEYBOARD SHORTCUTS
     globalShortcut.register('MediaPlayPause', () => { if(win) win.webContents.executeJavaScript('if(typeof togglePlay === "function") togglePlay();'); });
@@ -209,4 +351,11 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
 
 app.on('will-quit', () => globalShortcut.unregisterAll());
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+// For macOS file opening
+app.on('open-file', (event, filePath) => {
+  if (win) {
+    win.webContents.send('open-external-file', filePath);
+  }
+});
 ///yo

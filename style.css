@@ -92,10 +92,111 @@ body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white;
     padding: 10px; cursor: pointer; border-radius: 6px; color: var(--dim); font-size: 0.9rem;
     margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.05);
     display: flex; justify-content: space-between; align-items: center; transition: 0.2s;
+    overflow: hidden;
 }
 .item.active { color: var(--accent); background: rgba(76,194,255,0.1); font-weight: bold; }
 .item:hover { background: rgba(255,255,255,0.05); }
-.item-left { display: flex; align-items: center; gap: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; pointer-events: none;}
+.item-left { display: flex; align-items: center; gap: 10px; overflow: hidden; white-space: nowrap; pointer-events: none; flex: 1; }
+
+/* QUEUE TEXT WRAP & MARQUEE */
+.queue-text-wrap {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+}
+.q-title {
+    font-weight: bold;
+    color: white;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.88rem;
+    min-width: 0;
+}
+.q-artist {
+    font-size: 0.75rem;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+/* Smart Marquee System */
+.q-title, .q-artist, .display-title, .display-artist {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    width: 100%;
+    will-change: transform;
+}
+
+.marquee-active {
+    display: inline-block;
+    width: max-content !important;
+    min-width: 100%;
+}
+
+/* LOCKED STRICTLY TO IMMERSIVE (LYRICS) MODE ONLY */
+body.immersive #hover-q .item:hover .marquee-active,
+body.immersive .local-queue-container .item:hover .marquee-active,
+body.immersive .info:hover .marquee-active {
+    animation: smart-scroll 10s linear infinite;
+}
+
+@keyframes smart-scroll {
+    0%, 15% { transform: translateX(0); } /* Holds still at the start */
+    85%, 100% { transform: translateX(-50%); } /* Scrolls to end, holds for 1.5s, then snaps back */
+}
+
+.queue-text-wrap,
+.info {
+    min-width: 0;
+    overflow: hidden;
+}
+
+.queue-text-wrap:hover .marquee-active,
+.info:hover .marquee-active {
+    padding-right: 32px;
+}
+
+/* Keep the bottom bar text physically away from controls */
+.yt-player-bar {
+    height: 100px; background: var(--panel); width: 100vw; display: flex; align-items: center;
+    padding: 0 20px; z-index: 50; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+.info {
+    width: min(320px, 28vw);
+    max-width: calc(100% - 520px);
+    cursor: pointer; padding: 10px; border-radius: 8px; transition: 0.2s; display: flex; flex-direction: column; justify-content: center;
+    position: relative;
+    z-index: 1;
+}
+.info:hover { background: rgba(255,255,255,0.05); }
+.display-title { font-size: 1.1rem; font-weight: 700; color: white; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.display-artist { font-size: 0.9rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.controls-wrapper {
+    flex: 1; max-width: 700px; display: flex; flex-direction: column; align-items: center; padding: 0 20px;
+    position: relative;
+    z-index: 2;
+    min-width: 0;
+}
+.main-controls {
+    display: flex; align-items: center; gap: 20px; margin-bottom: 12px;
+    position: relative;
+    z-index: 3;
+    background: var(--panel);
+}
+
+@supports not (width: min(320px, 28vw)) {
+    .info {
+        width: 280px;
+    }
+}
 
 /* MAIN CONTENT VIEW */
 .yt-content {
@@ -153,7 +254,8 @@ body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white;
 
 .lyrics-view {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    padding: 130px 50px 50vh 50px; display: flex; flex-direction: column; align-items: center;
+    /* Task 1: Shifted bottom padding from 50vh to 60vh to prevent overlap with album art/tools */
+    padding: 130px 50px 60vh 50px; display: flex; flex-direction: column; align-items: center;
     overflow-y: auto; scroll-behavior: smooth; z-index: 1;
     mask-image: linear-gradient(to bottom, transparent 0%, black 2%, black 85%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 2%, black 85%, transparent 100%);
@@ -191,18 +293,6 @@ body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white;
 /* =========================================
    BOTTOM PLAYER BAR
    ========================================= */
-.yt-player-bar {
-    height: 100px; background: var(--panel); width: 100vw; display: flex; align-items: center;
-    padding: 0 20px; z-index: 50; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05);
-}
-
-.info { width: 250px; cursor: pointer; padding: 10px; border-radius: 8px; transition: 0.2s; display: flex; flex-direction: column; justify-content: center;}
-.info:hover { background: rgba(255,255,255,0.05); }
-.display-title { font-size: 1.1rem; font-weight: 700; color: white; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.display-artist { font-size: 0.9rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.controls-wrapper { flex: 1; max-width: 700px; display: flex; flex-direction: column; align-items: center; padding: 0 20px;}
-.main-controls { display: flex; align-items: center; gap: 20px; margin-bottom: 12px;}
 .ctrl-icon { color: var(--dim); cursor: pointer; font-size: 28px; transition: 0.2s;}
 .ctrl-icon:hover { color: white; }
 

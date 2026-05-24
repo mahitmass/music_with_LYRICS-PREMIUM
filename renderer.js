@@ -1,6 +1,6 @@
-var ctxMenu = document.getElementById('custom-context-menu');
-var ctxTargetSong = null;
-var toastTimeout;
+let ctxMenu = document.getElementById('custom-context-menu');
+let ctxTargetSong = null;
+let toastTimeout;
 function showToast(msg) {
     const toast = document.getElementById('toast');
     if(!toast) return;
@@ -30,7 +30,178 @@ const fs = require('fs');
 const path = require('path');
 
 let queue = [], curIdx = 0, lyrics = [], lyrIdx = -1;
+let mainQueue = [], mainIdx = 0;
+let plQueue = [], plIdx = 0;
+let activeQMode = 'main';
 let draggedIdx = null;
+
+const PRIMARY_API = 'https://saavn.sumit.co/api';
+const FALLBACK_API = 'https://jiosaavn-api-v3.vercel.app/api'; 
+const delay = ms => new Promise(res => setTimeout(res, ms));
+const INVALID_ARTISTS = new Set(['', 'unknown', 'unknown artist']);
+const VARIANT_TERMS = ['sped up', 'spedup', 'slowed', 'reverb', 'remix', 'lofi', 'lo-fi', 'nightcore'];
+const TIME_BUCKETS = ['Morning', 'Afternoon', 'Evening', 'Late Night'];
+
+async function fetchWithFallback(endpoint) {
+    try {
+        let res = await fetch(`${PRIMARY_API}${endpoint}`);
+        if (res.status === 429 || !res.ok) throw new Error("Primary API Failed or Rate Limited");
+        return res;
+    } catch (e) {
+        console.warn(`Primary API Error: ${e.message}. Falling back to secondary...`);
+        try {
+            let fallbackRes = await fetch(`${FALLBACK_API}${endpoint}`);
+            if (!fallbackRes.ok) throw new Error("Fallback also failed");
+            return fallbackRes;
+        } catch (fallbackError) {
+            console.error("TOTAL NETWORK FAILURE:", fallbackError);
+            throw fallbackError; 
+        }
+    }
+}
+
+function decodeHtmlText(value) {
+    return (value || '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+}
+
+function sanitizeArtistName(artist) {
+    const value = (artist || '').trim();
+    return INVALID_ARTISTS.has(value.toLowerCase()) ? '' : value;
+}
+
+function isKnownArtist(artist) {
+    return !!sanitizeArtistName(artist);
+}
+
+function normalizeMatchString(value) {
+    return decodeHtmlText(value)
+        .toLowerCase()
+        .replace(/[()[\]{}]/g, ' ')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function tokenizeMatchString(value) {
+    return normalizeMatchString(value).split(' ').filter(Boolean);
+}
+
+function containsVariantTerm(value) {
+    const text = normalizeMatchString(value);
+    return VARIANT_TERMS.some(term => text.includes(term.replace(/[^a-z0-9\s]/g, ' ').trim()));
+}
+
+function tokenSimilarity(a, b) {
+    const aTokens = new Set(tokenizeMatchString(a));
+    const bTokens = new Set(tokenizeMatchString(b));
+    if (aTokens.size === 0 || bTokens.size === 0) return 0;
+
+    let overlap = 0;
+    aTokens.forEach(token => {
+        if (bTokens.has(token)) overlap++;
+    });
+
+    return overlap / Math.max(aTokens.size, bTokens.size);
+}
+
+function getSongArtist(song) {
+    return decodeHtmlText(song?.artists?.primary?.[0]?.name || song?.artists?.[0]?.name || song?.primaryArtists || '');
+}
+
+function scoreApiSongMatch(apiSong, sourceTitle, sourceArtist = '') {
+    const resultTitle = decodeHtmlText(apiSong?.name || apiSong?.title || '');
+    const resultArtist = getSongArtist(apiSong);
+    const titleSimilarity = tokenSimilarity(sourceTitle, resultTitle);
+    const artistSimilarity = isKnownArtist(sourceArtist) ? tokenSimilarity(sourceArtist, resultArtist) : 0;
+    const queryHasVariant = containsVariantTerm(sourceTitle);
+    const resultHasVariant = containsVariantTerm(resultTitle);
+    const sameTitleBias = normalizeMatchString(resultTitle).includes(normalizeMatchString(sourceTitle)) ? 15 : 0;
+    const artistBias = artistSimilarity * 35;
+    const titleBias = titleSimilarity * 100;
+    const variantPenalty = resultHasVariant && !queryHasVariant ? 150 : 0;
+
+    return titleBias + artistBias + sameTitleBias - variantPenalty;
+}
+
+function pickBestApiMatch(results, sourceTitle, sourceArtist = '') {
+    if (!Array.isArray(results) || results.length === 0) return null;
+
+    const ranked = results
+        .filter(song => Array.isArray(song?.downloadUrl) && song.downloadUrl.length > 0)
+        .map(song => ({ song, score: scoreApiSongMatch(song, sourceTitle, sourceArtist) }))
+        .sort((a, b) => b.score - a.score);
+
+    return ranked[0]?.song || null;
+}
+
+function buildTimeBucketMap() {
+    return { Morning: 0, Afternoon: 0, Evening: 0, 'Late Night': 0 };
+}
+
+function getDefaultAiModel() {
+    return { songs: {}, artists: {} };
+}
+
+function loadAiUserModel() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem('ai_user_model') || '{}');
+        return {
+            songs: parsed.songs || {},
+            artists: parsed.artists || {}
+        };
+    } catch (e) {
+        return getDefaultAiModel();
+    }
+}
+
+function saveAiUserModel() {
+    localStorage.setItem('ai_user_model', JSON.stringify(aiUserModel));
+}
+
+function getSongModelKey(song) {
+    if (!song) return '';
+    return (song.ytId || song.id || song.p || `${sanitizeArtistName(song.a)}::${normalizeMatchString(song.t)}`).toString();
+}
+
+function getTimeBucket(date = new Date()) {
+    const hour = date.getHours();
+    if (hour >= 5 && hour < 12) return 'Morning';
+    if (hour >= 12 && hour < 17) return 'Afternoon';
+    if (hour >= 17 && hour < 22) return 'Evening';
+    return 'Late Night';
+}
+
+function ensureSongStats(song) {
+    const key = getSongModelKey(song);
+    if (!key) return null;
+    if (!aiUserModel.songs[key]) {
+        aiUserModel.songs[key] = {
+            title: decodeHtmlText(song.t),
+            artist: sanitizeArtistName(song.a),
+            play_count: 0,
+            skip_rate: 0,
+            time_of_day: buildTimeBucketMap()
+        };
+    }
+    return aiUserModel.songs[key];
+}
+
+function ensureArtistStats(artist) {
+    const cleanArtist = sanitizeArtistName(artist);
+    if (!cleanArtist) return null;
+    if (!aiUserModel.artists[cleanArtist]) {
+        aiUserModel.artists[cleanArtist] = {
+            play_count: 0,
+            skip_rate: 0,
+            artist_affinity: 0,
+            time_of_day: buildTimeBucketMap()
+        };
+    }
+    return aiUserModel.artists[cleanArtist];
+}
+
+let aiUserModel = loadAiUserModel();
+let currentListenSession = null;
 let currentSongId = ""; 
 let songSyncOffset = 0; 
 let isEditing = false;
@@ -127,6 +298,7 @@ window.addEventListener('load', () => {
     if (typeof loadHomepage === 'function') {
         loadHomepage();
     }
+
 });
 
 // --- GLOBAL KEYBOARD SHORTCUTS ---
@@ -319,11 +491,16 @@ async function fetchOnlineSearch(query, containerId) {
     if(!container) return;
 
     try {
-        let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=40`);
+        let res = await fetchWithFallback(`/search/songs?query=${encodeURIComponent(query)}&limit=40`);
         if (!res.ok) throw new Error("API Blocked");
         
         let json = await res.json();
         let results = (json.data && json.data.results) ? json.data.results : [];
+        results = results
+            .map(song => ({ song, score: scoreApiSongMatch(song, query) }))
+            .filter(entry => entry.score > -120)
+            .sort((a, b) => b.score - a.score)
+            .map(entry => entry.song);
 
         if (results.length > 0) {
             let html = "";
@@ -396,6 +573,10 @@ function addNextOnline(title, artist, cover, url) {
 
 function play(i) {
     if (i < 0 || i >= queue.length) return;
+    const nextSong = queue[i];
+    if (currentListenSession && currentListenSession.key !== getSongModelKey(nextSong)) {
+        finalizeListeningSession('switch');
+    }
 
     curIdx = i;
     const s = queue[i];
@@ -430,6 +611,7 @@ function play(i) {
 
     if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
     if (typeof getLyrics === 'function') getLyrics(s);
+    startListeningSession(s);
 }
 
 // Helper function to add the clicked YT Music song to your queue
@@ -944,6 +1126,47 @@ function scrollToCurrentSong() {
     }, 150);
 }
 
+// ==========================================
+// --- SMART MARQUEE STATE (HIGH EFFICIENCY) ---
+// ==========================================
+// Define the observer globally ONCE so it never crashes on startup
+const marqueeObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        const el = entry.target;
+        if (entry.isIntersecting) {
+            // ONLY measure pixels if the song is physically visible on screen
+            if (el.scrollWidth > el.clientWidth + 4) el.classList.add('marquee-active');
+            else el.classList.remove('marquee-active');
+        } else {
+            // Stop animations for songs off-screen to save CPU and RAM
+            el.classList.remove('marquee-active'); 
+        }
+    });
+}, { root: null, rootMargin: '50px' });
+
+function syncMarqueeState(el) {
+    if (!el) return;
+    marqueeObserver.observe(el);
+}
+
+// High-Efficiency Hover Marquee Checker (Zero Lag!)
+document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('.q-title, .q-artist, .display-title, .display-artist');
+    if (!target) return;
+
+    // Only apply animation if the text physically overflows its box
+    if (target.scrollWidth > target.clientWidth + 2) {
+        target.classList.add('marquee-active');
+    }
+});
+
+document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('.q-title, .q-artist, .display-title, .display-artist');
+    if (target) target.classList.remove('marquee-active');
+});
+
+
+// Update draw() to disconnect and reconnect efficiently
 function draw() {
     const sideSearch = document.getElementById('sidebar-search');
     const searchTerm = sideSearch ? sideSearch.value : '';
@@ -951,26 +1174,37 @@ function draw() {
     
     const qList = document.getElementById('queue-list');
     const hList = document.getElementById('hover-queue-list');
-    
-    // 1. Save exactly where the user is currently scrolled!
     const qScroll = qList ? qList.scrollTop : 0;
     const hScroll = hList ? hList.scrollTop : 0;
+
+    // Disconnect the observer before wiping the HTML to prevent memory leaks
+    marqueeObserver.disconnect();
 
     const html = queue.map((s, i) => {
     let icon = s.isOnline ? "cloud" : "drag_indicator";
     return `
         <div class="item ${i===curIdx?'active':''}" data-type="queue-item" data-index="${i}" draggable="true" ondragstart="dragStart(event, ${i})" ondragend="dragEnd(event)" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="drop(event, ${i})" onclick="play(${i})">
-        <div class="item-left"><span class="material-icons-round drag-handle">${icon}</span> ${i+1}. ${s.t}</div>
-        <div class="del-btn" onclick="event.stopPropagation(); queue.splice(${i}, 1); if(${i} < curIdx) curIdx--; else if(${i} === curIdx && queue.length > 0) play(curIdx >= queue.length ? 0 : curIdx); draw(); saveState();">✕</div>        </div>
+            <div class="item-left">
+                <span class="material-icons-round drag-handle">${icon}</span>
+                <div class="queue-text-wrap">
+                    <div class="q-title">${i+1}. ${s.t}</div>
+                    <div class="q-artist">${s.a || 'Unknown Artist'}</div>
+                </div>
+            </div>
+            <div class="del-btn" onclick="event.stopPropagation(); queue.splice(${i}, 1); if(${i} < curIdx) curIdx--; else if(${i} === curIdx && queue.length > 0) play(curIdx >= queue.length ? 0 : curIdx); draw(); saveState();">✕</div>
+        </div>
     `}).join('');
     
     if(qList) qList.innerHTML = html;
     if(hList) hList.innerHTML = html;
     
-    // 2. Instantly restore their scroll position so it never jumps!
     if(qList) qList.scrollTop = qScroll;
     if(hList) hList.scrollTop = hScroll;
+
+    // Pass only the newly created queue text to the observer
+    document.querySelectorAll('.q-title, .q-artist').forEach(syncMarqueeState);
 }
+
 function getWorkingUrl(downloadUrlArr) {
     if (!downloadUrlArr || !Array.isArray(downloadUrlArr)) return "";
 
@@ -989,53 +1223,69 @@ function getWorkingUrl(downloadUrlArr) {
 function safePlay(url) {
     const audio = document.getElementById('player');
     audio.pause();
-    audio.removeAttribute('src');  // 🔥 IMPORTANT (forces reset)
+    audio.removeAttribute('src'); 
     
-    setTimeout(() => {
-        audio.src = url;
-        audio.load();
+    if (!url || url.trim() === '') return false;
 
-        audio.play().catch(e => {
-            console.error("Playback failed:", e);
-            // Ignore AbortError since safePlay purposely interrupts
+    // Notice: No setTimeout! It plays instantly.
+    audio.src = url;
+    audio.load();
+    let playPromise = audio.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(e => {
+            console.warn("Playback interrupted (safe to ignore if rapidly skipping)");
         });
-    }, 50);
+    }
+    return true;
 }
 
+let isCircuitBreakerActive = false;
+
 function tryPlayWithRetry(song, attempt) {
+    if (isCircuitBreakerActive) return; // Stop cascading failures
     const audio = document.getElementById('player');
-    
-    if (attempt > 2) {
+
+    if (attempt > 1) {
         console.error("All retries failed");
-        showToast("❌ Cannot play this track. Skipping...");
-        setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
+        showToast("❌ Network Error. Pausing playback to prevent spam.");
+        isCircuitBreakerActive = true; 
+        setTimeout(() => { isCircuitBreakerActive = false; }, 5000); // Cool down for 5 seconds
         return;
     }
 
-    safePlay(song.p);
+    const playAttempt = safePlay(song.p);
+    
+    // If safePlay rejected the URL because it was empty, immediately trigger the error logic
+    if (!playAttempt) {
+        audio.dispatchEvent(new Event('error'));
+        return;
+    }
 
     audio.onerror = async () => {
+        if (isCircuitBreakerActive) return;
         console.log("Stream failed, Retrying... Attempt:", attempt + 1);
-
         try {
-            // REFETCH fresh URL directly from the API
-            let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(song.t + " " + song.a)}&limit=1`);
+            let res = await fetchWithFallback(`/search/songs?query=${encodeURIComponent(song.t + " " + song.a)}&limit=1`);
             let json = await res.json();
-            let newSong = json.data?.results?.[0] || json.data?.songs?.results?.[0];
-
+            const results = json.data?.results || json.data?.songs?.results || [];
+            let newSong = pickBestApiMatch(results, song.t, song.a);
             let newUrl = getWorkingUrl(newSong?.downloadUrl);
 
             if (newUrl) {
                 song.p = newUrl;
-                saveState(); // Update the queue memory with the fresh link
+                saveState(); 
                 tryPlayWithRetry(song, attempt + 1);
             } else {
-                throw new Error("No URL");
+                throw new Error("No URL found in fallback");
             }
         } catch (e) {
-            console.error("Retry failed:", e);
-            showToast("❌ Playback failed. Skipping...");
-            setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
+            console.error("Retry completely failed:", e);
+            showToast("❌ Track unavailable right now.");
+            isCircuitBreakerActive = true;
+            setTimeout(() => { 
+                isCircuitBreakerActive = false; 
+                if (typeof playNext === 'function') playNext(); 
+            }, 3000); // Wait 3 full seconds before skipping to save CPU
         }
     };
 }
@@ -1294,7 +1544,7 @@ function processNextAITask() {
 
 function triggerManualAIGeneration() {
     const song = queue[curIdx];
-    if (!song || song.isOnline) return;
+    if (!song) return;
 
     // Prevent double-clicking or adding a song that's already waiting!
     if (currentAITask?.p === song.p || aiTaskQueue.some(t => t.song.p === song.p)) {
@@ -1322,31 +1572,21 @@ function triggerManualAIGeneration() {
 
 
 async function generateAILyrics(song) {
-    return new Promise(async (resolve, reject) => {
-        try {
-            if (!aiWorker) aiWorker = new Worker('./ai-worker.js', { type: 'module' });
-
-            // Use Electron's built-in Web Audio API to decode MP3 instantly (No FFMPEG needed!)
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-            const fileBuffer = fs.readFileSync(song.p);
-            const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
-            const messageHandler = (event) => {
-                const data = event.data;
-                if (data.status === 'done' && data.songPath === song.p) {
-                    aiWorker.removeEventListener('message', messageHandler);
-                    resolve({ lrc: data.lrc, song: song });
-                } else if (data.status === 'error' && data.songPath === song.p) {
-                    aiWorker.removeEventListener('message', messageHandler);
-                    reject(new Error(data.message));
-                }
-            };
-            
-            aiWorker.addEventListener('message', messageHandler);
-            aiWorker.postMessage({ audioData: audioBuffer.getChannelData(0), songPath: song.p });
-        } catch (error) { reject(error); }
-    });
+    try {
+        updateAIButtons('block', 'AI is working...', true);
+        
+        // Task 1: Use main process IPC for high-efficiency transcription (handles URLs safely)
+        const result = await ipcRenderer.invoke('transcribe-audio', song.p);
+        
+        if (result.status === 'success') {
+            return { lrc: result.lrc, song: song };
+        } else {
+            throw new Error(result.message || "Transcription failed");
+        }
+    } catch (error) {
+        console.error("Renderer AI Error:", error);
+        throw error;
+    }
 }
 
     // --- FETCH LYRICS ---
@@ -1454,13 +1694,12 @@ async function getLyrics(s) {
       if (isSongInAIQueue) {
           lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">AI is generating lyrics in background...</p>';
           updateAIButtons('block', 'AI is working...', true);
-      } else if (!s.isOnline) {
-          lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">No lyrics found in database.</p>';
-          showToast("No lyrics found. Click ✨ to Generate Locally.");
-          updateAIButtons('block', 'Generate Lyrics with AI', false);
       } else {
-          localStorage.setItem('apiEmpty_' + cSongId, "true");
-          lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">No synced lyrics found in database.</p>'; 
+          // Task 1: Always offer AI generation for cloud or local songs if database is empty
+          lContent.innerHTML = `<p class="lyric-line" style="opacity: 1; filter: blur(0px);">No lyrics found in database.</p>`;
+          showToast("No lyrics found. Click ✨ to Generate with AI.");
+          updateAIButtons('block', 'Generate Lyrics with AI', false);
+          if (s.isOnline) localStorage.setItem('apiEmpty_' + cSongId, "true");
       }
     }
 
@@ -1468,6 +1707,41 @@ async function getLyrics(s) {
     console.error("Lyric Fetch Error:", e);
     lContent.innerHTML = `<p class="lyric-line" style="opacity: 1; filter:blur(0); color:#ff4c4c;">App Error: ${e.message}</p>`;
   }
+}
+
+function startListeningSession(song) {
+    if (!song) return;
+    currentListenSession = {
+        key: getSongModelKey(song),
+        song: { t: song.t, a: song.a, p: song.p, ytId: song.ytId, id: song.id },
+        bucket: getTimeBucket(),
+        startTime: audio.currentTime || 0
+    };
+}
+
+function finalizeListeningSession(reason = 'switch') {
+    if (!currentListenSession) return;
+
+    const listenedMs = Math.max(0, ((audio.currentTime || 0) - currentListenSession.startTime) * 1000);
+    const songStats = ensureSongStats(currentListenSession.song);
+    const artistStats = ensureArtistStats(currentListenSession.song.a);
+    const shouldCountBucket = listenedMs >= 5000 || reason === 'completed' || reason === 'skipped';
+
+    if (artistStats) {
+        artistStats.artist_affinity += listenedMs;
+        if (shouldCountBucket) artistStats.time_of_day[currentListenSession.bucket] += 1;
+        if (reason === 'completed') artistStats.play_count += 1;
+        if (reason === 'skipped') artistStats.skip_rate += 1;
+    }
+
+    if (songStats) {
+        if (shouldCountBucket) songStats.time_of_day[currentListenSession.bucket] += 1;
+        if (reason === 'completed') songStats.play_count += 1;
+        if (reason === 'skipped') songStats.skip_rate += 1;
+    }
+
+    saveAiUserModel();
+    currentListenSession = null;
 }
 
 function show(lrc) {
@@ -1483,7 +1757,8 @@ function show(lrc) {
 
     if (isSongInAIQueue) {
         updateAIButtons('block', 'AI is working...', true);
-    } else if (!isSynced && queue[curIdx] && !queue[curIdx].isOnline) {
+    } else if (!isSynced && queue[curIdx]) {
+        // Task 1: Offer AI Auto-Sync for plain text even on cloud songs
         showToast("Only plain text found. Click ✨ to Auto-Sync.");
         updateAIButtons('block', 'AI Auto-Sync Plain Text', false);
     } else {
@@ -1543,7 +1818,7 @@ function togglePlay() {
   }
 }
 
-function playNext() { 
+function advanceQueueToNext() {
   if (curIdx + 1 < queue.length) {
     play(curIdx + 1);
   } else {
@@ -1552,8 +1827,14 @@ function playNext() {
     document.getElementById('p-icon').innerText = 'play_arrow';
   }
 }
+
+function playNext() { 
+  finalizeListeningSession(audio.currentTime > 0 && audio.currentTime < 30 ? 'skipped' : 'switch');
+  advanceQueueToNext();
+}
     
 function playPrev() { 
+    finalizeListeningSession('switch');
     // If the song has been playing for 3 seconds, previous just restarts the track
     if (audio.currentTime > 3) { 
     audio.currentTime = 0; 
@@ -1571,7 +1852,10 @@ function shuffleRemaining() {
     queue = [...queue.slice(0, curIdx + 1), ...remaining]; draw(); saveState();
     showToast("Queue shuffled");
 }
-audio.onended = playNext;
+audio.onended = () => {
+    finalizeListeningSession('completed');
+    advanceQueueToNext();
+};
 
 
 // --- SCROLL HANDLING ---
@@ -1764,28 +2048,59 @@ async function loadHomepage() {
     const container = document.getElementById('dynamic-homepage');
     if (!container) return;
     container.innerHTML = `<div style="padding: 20px; color: var(--dim);"><span class="material-icons-round" style="animation: spin 1s linear infinite; vertical-align: middle;">sync</span> AI is scanning your history...</div>`;
-    
-    let counts = {};
-    queue.forEach(s => {
-        if (s.a && s.a !== 'Unknown') {
-            s.a.split(',').forEach(a => { let trimA = a.trim(); if(trimA) counts[trimA] = (counts[trimA] || 0) + 1; });
-        }
-    });
-    let topArtists = Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
-    
+
+    const currentBucket = getTimeBucket();
+    const bucketLabel = currentBucket === 'Late Night' ? 'Late Night' : currentBucket;
+    const queueArtists = [...new Set(queue.map(song => sanitizeArtistName(song.a)).filter(Boolean))];
+    const artistEntries = Object.entries(aiUserModel.artists)
+        .filter(([artist]) => isKnownArtist(artist))
+        .map(([artist, stats]) => {
+            const timeBonus = stats.time_of_day?.[currentBucket] || 0;
+            return {
+                artist,
+                score: (stats.play_count * 1.5) - (stats.skip_rate * 2) + timeBonus,
+                affinity: stats.artist_affinity || 0,
+                skip_rate: stats.skip_rate || 0
+            };
+        })
+        .sort((a, b) => (b.score - a.score) || (b.affinity - a.affinity));
+
+    const topArtist = artistEntries[0]?.artist || queueArtists[0] || '';
+    const bucketArtist = [...artistEntries]
+        .sort((a, b) => ((b.affinity + ((aiUserModel.artists[b.artist]?.time_of_day?.[currentBucket] || 0) * 1000)) - (a.affinity + ((aiUserModel.artists[a.artist]?.time_of_day?.[currentBucket] || 0) * 1000))))
+        .find(entry => (aiUserModel.artists[entry.artist]?.time_of_day?.[currentBucket] || 0) > 0)?.artist;
+    const skippedArtist = [...artistEntries].sort((a, b) => b.skip_rate - a.skip_rate)[0]?.artist;
+    const recoveryArtist = artistEntries.find(entry => entry.artist !== skippedArtist)?.artist || queueArtists.find(artist => artist !== skippedArtist);
+
     let shelves = [];
-    if (topArtists.length > 0) shelves.push({ q: topArtists[0], title: `Because you love ${topArtists[0]}`, type: 'songs' });
-    if (topArtists.length > 1) shelves.push({ q: topArtists[1], title: `More from ${topArtists[1]}`, type: 'songs' });
-    if (topArtists.length > 2) shelves.push({ q: topArtists[2], title: `${topArtists[2]} Mixes & Playlists`, type: 'playlists' });
-    
-    const fallbacks = [
-        { q: "Global Top 50", title: "Global Playlists", type: "playlists" },
-        { q: "Viral Hits", title: "Internet Viral Songs", type: "songs" },
-        { q: "Lo-Fi Chill", title: "Deep Focus & Chill", type: "playlists" },
-        { q: "Party Anthems", title: "Weekend Party Playlists", type: "playlists" },
-        { q: "Acoustic Pop", title: "Unplugged & Acoustic", type: "songs" }
-    ];
-    shelves = [...shelves, ...fallbacks];
+    if (bucketArtist) shelves.push({ q: bucketArtist, title: `Your ${bucketLabel} Vibes`, type: 'songs' });
+    if (topArtist) shelves.push({ q: topArtist, title: `Heavy Rotation: ${topArtist}`, type: 'songs' });
+    if (topArtist) shelves.push({ q: topArtist, title: `${topArtist} Mixes & Playlists`, type: 'playlists' });
+    if (skippedArtist && recoveryArtist) {
+        shelves.push({ q: recoveryArtist, title: `Because you skipped ${skippedArtist}, try ${recoveryArtist}`, type: 'songs' });
+    }
+
+    if (topArtist && Math.random() < 0.10) {
+        shelves.push({ q: `${topArtist} similar artists`, title: `Discovery Entropy: Beyond ${topArtist}`, type: 'songs' });
+    }
+
+    if (shelves.length === 0) {
+        const fallbackArtists = queueArtists.slice(0, 3);
+        fallbackArtists.forEach((artist, index) => {
+            shelves.push({
+                q: artist,
+                title: index === 0 ? `Heavy Rotation: ${artist}` : `More from ${artist}`,
+                type: index === 2 ? 'playlists' : 'songs'
+            });
+        });
+    }
+
+    if (shelves.length === 0) {
+        shelves = [
+            { q: "Global Top 50", title: "Global Playlists", type: "playlists" },
+            { q: "Viral Hits", title: "Internet Viral Songs", type: "songs" }
+        ];
+    }
 
     let html = '';
     shelves.forEach((item, i) => {
@@ -1798,6 +2113,7 @@ async function loadHomepage() {
     container.innerHTML = html;
 
     for (let i = 0; i < shelves.length; i++) {
+        await delay(600); // Stagger loop to prevent rate limiting
         if (shelves[i].type === 'playlists') populatePlaylistCarousel(shelves[i].q, `carousel-${i}`);
         else populateCarousel(shelves[i].q, `carousel-${i}`);
     }
@@ -1807,9 +2123,10 @@ async function populateCarousel(query, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
     try {
-        let res = await fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=15`);
+        let res = await fetchWithFallback(`/search/songs?query=${encodeURIComponent(query)}&limit=15`);
         let json = await res.json();
         let results = (json.data && json.data.results) ? json.data.results : [];
+        results = results.filter(song => isKnownArtist(getSongArtist(song)));
 
         if (results.length > 0) {
             let html = "";
@@ -1848,7 +2165,7 @@ async function populatePlaylistCarousel(query, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
     try {
-        let res = await fetch(`https://saavn.sumit.co/api/search/playlists?query=${encodeURIComponent(query)}&limit=10`);
+        let res = await fetchWithFallback(`/search/playlists?query=${encodeURIComponent(query)}&limit=10`);
         let json = await res.json();
         let results = (json.data && json.data.results) ? json.data.results : [];
 
@@ -1874,7 +2191,7 @@ html += `
 async function loadSaavnPlaylist(id, titleName) {
     showToast("Fetching Playlist Tracks...");
     try {
-        let res = await fetch(`https://saavn.sumit.co/api/playlists?id=${id}`);
+        let res = await fetchWithFallback(`/playlists?id=${id}`);
         let json = await res.json();
         if (json.data && json.data.songs) {
             let mappedSongs = json.data.songs.map(song => {
@@ -1920,9 +2237,6 @@ function playDirectlyFromHome(title, artist, cover, url) {
 // ==========================================
 // --- 2. DUAL QUEUE SYSTEM ---
 // ==========================================
-let mainQueue = [], mainIdx = 0;
-let plQueue = [], plIdx = 0;
-let activeQMode = 'main';
 
 function switchQueueMode(mode) {
     if (activeQMode === mode) return;
@@ -2241,11 +2555,8 @@ document.getElementById('player').addEventListener('playing', () => {
         lastLyricFetchTrack = curIdx;
         
         // Trigger whatever your default lyrics fetch function is named
-        // (This assumes your function is called fetchLyrics or loadLyrics)
-        if (typeof fetchLyrics === 'function') {
-            fetchLyrics();
-        } else if (typeof loadLyrics === 'function') {
-            loadLyrics();
+        if (typeof getLyrics === 'function' && queue[curIdx]) {
+            getLyrics(queue[curIdx]);
         }
     }
 });
@@ -2254,53 +2565,56 @@ document.getElementById('player').addEventListener('playing', () => {
 // --- BACKGROUND AUDIO PRELOADER ---
 // ==========================================
 let lastPreloadedIdx = -1;
-
 async function preloadNextSong() {
     const nextIdx = curIdx + 1;
-    if (nextIdx >= queue.length) return; 
+    if (nextIdx >= queue.length) return;
+    
+    // 1. If we already tried preloading this exact song, DO NOT try again.
     if (lastPreloadedIdx === nextIdx) return; 
 
     const nextSong = queue[nextIdx];
-    
     if (!nextSong.isOnline || (!nextSong.needsAudioStream && nextSong.p)) return; 
 
+    // 2. LOCK IT IMMEDIATELY so the audio timer doesn't fire 60 times a second!
     lastPreloadedIdx = nextIdx;
     console.log(`[Preloader] Silently fetching audio for next track: ${nextSong.t}...`);
 
     let foundStream = false;
-
-    const saavnApis = [
-        `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(nextSong.a + " " + nextSong.t)}&limit=1`,
-        `https://saavn.dev/api/search/songs?query=${encodeURIComponent(nextSong.t)}&limit=1`
+    const saavnEndpoints = [
+        `/search/songs?query=${encodeURIComponent(nextSong.a + " " + nextSong.t)}&limit=1`,
+        `/search/songs?query=${encodeURIComponent(nextSong.t)}&limit=1`
     ];
-    for (const url of saavnApis) {
+
+    for (const endpoint of saavnEndpoints) {
         try {
-            let res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+            let res = await fetchWithFallback(endpoint);
             if (!res.ok) continue;
             let json = await res.json();
             let results = json.data?.results || json.data?.songs?.results || [];
+            const bestMatch = pickBestApiMatch(results, nextSong.t, nextSong.a);
             
-            if (results.length > 0 && results[0].downloadUrl?.length > 0) {
-                let dlArray = results[0].downloadUrl;
-                
-                // THE 160kbps FIREWALL BYPASS:
+            if (bestMatch && bestMatch.downloadUrl?.length > 0) {
+                let dlArray = bestMatch.downloadUrl;
                 let dlObj = dlArray.find(u => u.quality === '160kbps') || dlArray[dlArray.length > 1 ? dlArray.length - 2 : 0];
                 
                 if (dlObj && dlObj.url) {
                     nextSong.p = dlObj.url.replace('aac.saavncdn.com', 'c.saavncdn.com');
-                    foundStream = true; break;
+                    foundStream = true; 
+                    break;
                 }
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn("[Preloader] Endpoint failed, trying next...");
+        }
     }
 
     if (foundStream && nextSong.p) {
         nextSong.needsAudioStream = false;
         saveState();
         console.log(`[Preloader] Success! Next song is locked and loaded.`);
-    } else {
-        lastPreloadedIdx = -1;
-    }
+    } 
+    // 3. THE FIX: Notice we do NOT reset lastPreloadedIdx to -1 here anymore! 
+    // If it fails, it stays locked so it doesn't spam the API.
 }
 
 
