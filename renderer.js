@@ -524,7 +524,7 @@ async function fetchOnlineSearch(query, containerId) {
                     let safeDL = downloadLink.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
                     html += `
-                    <div class="item" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}')" style="cursor:pointer; border-left: 3px solid #4cc2ff; align-items: center; padding: 8px 10px;">
+                    <div class="item" data-type="search-result" data-title="${safeT}" data-artist="${safeA}" data-cover="${safeC}" data-url="${safeDL}" data-ytid="${song.videoId || ''}" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}')" style="cursor:pointer; border-left: 3px solid #4cc2ff; align-items: center; padding: 8px 10px;">
                     <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
                     <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
                         <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
@@ -1878,7 +1878,7 @@ function handleManualScroll(e) {
     const ps = document.getElementsByClassName('lyric-line');
     const lView = document.getElementById('l-view');
     if (lView && typeof lyrIdx !== 'undefined' && lyrIdx >= 0 && ps[lyrIdx]) {
-        lView.scrollTo({top: ps[lyrIdx].offsetTop - (lView.clientHeight/2) + 20, behavior:'smooth'});
+        lView.scrollTo({top: ps[lyrIdx].offsetTop - (lView.clientHeight / 3.5), behavior:'smooth'});
     }
     }, 2000);
 }
@@ -1911,7 +1911,7 @@ audio.ontimeupdate = () => {
         if(ps[act]) {
         ps[act].classList.add('highlight');
         if (!isEditing && !isUserScrolling) {
-            lView.scrollTo({top: ps[act].offsetTop - (lView.clientHeight/2) + 20, behavior:'smooth'});
+            lView.scrollTo({top: ps[act].offsetTop - (lView.clientHeight / 3.5), behavior:'smooth'});
         }
         }
     }
@@ -2149,7 +2149,8 @@ async function populateCarousel(query, containerId) {
      data-cover="${safeC}" 
      data-url="${safeDL}" 
      data-ytid="${song.videoId || ''}"
-     onclick="playDirectlyFromHome('${safeT}', '${safeA}', '${safeC}', '${safeDL}')">
+     onclick="playDirectlyFromHome('${safeT}', '${safeA}', '${safeC}', '${safeDL}')"
+     oncontextmenu="openSearchMenu(event, '${encodeURIComponent(JSON.stringify(song))}')">
     <img src="${cover}">
     <div class="title">${title}</div>
     <div class="artist">${artist}</div>
@@ -2306,6 +2307,8 @@ function goToArtist() {
 let currentLoadedPlaylist = [];
 
 function switchView(viewName) {
+    const ctxMenu = document.getElementById('custom-context-menu');
+    if (ctxMenu) ctxMenu.style.display = 'none';
     const panels = ['home', 'playlist', 'player'];
     panels.forEach(v => {
         const el = document.getElementById(`view-${v}`);
@@ -2623,101 +2626,90 @@ const originalOnload = window.onload;
 window.onload = () => {
     if(originalOnload) originalOnload();
 };
-// ==========================================
-// --- PRO CONTEXT MENU ENGINE ---
-// ==========================================
-
-// 1. Force base styling directly through JS so it NEVER fails to show
-if (ctxMenu) {
-    ctxMenu.style.position = 'fixed';
-    ctxMenu.style.zIndex = '999999';
-    ctxMenu.style.background = '#1a1a1a';
-    ctxMenu.style.border = '1px solid var(--accent)';
-    ctxMenu.style.borderRadius = '8px';
-    ctxMenu.style.padding = '8px 0';
-    ctxMenu.style.boxShadow = '0 10px 30px rgba(0,0,0,0.8)';
-    ctxMenu.style.display = 'none'; // Hidden by default
-    ctxMenu.style.minWidth = '180px';
-}
 
 // ==========================================
-// --- 5. CUSTOM RIGHT CLICK & LOCAL PLAYLIST ---
+// --- UNIFIED RIGHT-CLICK CONTEXT MENU ---
 // ==========================================
 
-// We store the target globally on the window object so inline HTML clicks can find it!
+// 1. Global Target Memory
 window.ctxTargetSong = null;
 
-// 1. Upgraded Right-Click Listener (Songs, Playlists, AND Queue)
+// 2. The ONLY Right-Click Listener You Will Ever Need
 document.addEventListener('contextmenu', (e) => {
-    const card = e.target.closest('.song-card');
-    const queueItem = e.target.closest('.item[data-type="queue-item"]'); // NEW: Detects queue clicks!
+    // Find what we clicked on
+    const card = e.target.closest('.song-card[data-type="song"]');
+    const searchItem = e.target.closest('.item[data-type="search-result"]');
+    const playlistCard = e.target.closest('.song-card[data-type="playlist"]');
+    const queueItem = e.target.closest('.item[data-type="queue-item"]');
     
-    // DYNAMICALLY grab the menu
     const menu = document.getElementById('custom-context-menu');
     if (!menu) return;
 
-    // --- IF IT IS A HOME SCREEN SONG OR PLAYLIST ---
-    if (card) {
-        e.preventDefault(); 
-        
-        if (card.getAttribute('data-type') === 'song') {
-            window.ctxTargetSong = {
-                t: card.getAttribute('data-title'), 
-                a: card.getAttribute('data-artist'),
-                cover: card.getAttribute('data-cover'), 
-                p: card.getAttribute('data-url'),
-                ytId: card.getAttribute('data-ytid'), 
-                isOnline: true, 
-                needsAudioStream: !card.getAttribute('data-url')
-            };
+    let menuHtml = '';
 
-            menu.innerHTML = `
-                <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
-                <div class="context-item" onclick="addToQueueDirect(window.ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
-                <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
-            `;
-        } else if (card.getAttribute('data-type') === 'playlist') {
-            const plId = card.getAttribute('data-id');
-            const plTitle = card.getAttribute('data-title');
-            menu.innerHTML = `
-                <div class="context-item" onclick="loadSaavnPlaylist('${plId}', '${plTitle}')"><span class="material-icons-round">play_circle</span> Load Entire Playlist</div>
-            `;
-        }
+    // Case A: A Song Card (Homepage) OR Search Result (Sidebar)
+    if (card || searchItem) {
+        e.preventDefault(); 
+        const el = card || searchItem;
         
-        menu.style.left = `${e.pageX}px`; 
-        menu.style.top = `${e.pageY}px`;
-        menu.style.display = 'block'; 
+        window.ctxTargetSong = {
+            t: el.getAttribute('data-title'), 
+            a: el.getAttribute('data-artist'),
+            cover: el.getAttribute('data-cover'), 
+            p: el.getAttribute('data-url'),
+            ytId: el.getAttribute('data-ytid') || '', 
+            isOnline: true, 
+            needsAudioStream: !el.getAttribute('data-url')
+        };
+
+        menuHtml = `
+            <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
+            <div class="context-item" onclick="addToQueueDirect(window.ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
+            <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
+        `;
+    } 
+    // Case B: A Playlist Card
+    else if (playlistCard) {
+        e.preventDefault();
+        const plId = playlistCard.getAttribute('data-id');
+        const plTitle = playlistCard.getAttribute('data-title');
+        menuHtml = `
+            <div class="context-item" onclick="loadSaavnPlaylist('${plId}', '${plTitle}')"><span class="material-icons-round">play_circle</span> Load Entire Playlist</div>
+        `;
     }
-    // --- IF IT IS A QUEUE ITEM ---
+    // Case C: A Queue Item
     else if (queueItem) {
         e.preventDefault();
-        
-        // Find exactly which song they right-clicked in the queue array
         const qIdx = parseInt(queueItem.getAttribute('data-index'));
         const song = queue[qIdx];
         if (!song) return;
 
         window.ctxTargetSong = song;
 
-        menu.innerHTML = `
+        menuHtml = `
             <div class="context-item" onclick="play(${qIdx}); document.getElementById('custom-context-menu').style.display='none';"><span class="material-icons-round">play_arrow</span> Play Now</div>
             <div class="context-item" onclick="removeFromQueue(${qIdx})"><span class="material-icons-round">remove_circle_outline</span> Remove from Queue</div>
             <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
             <div class="context-item" onclick="shareTrackDirect(window.ctxTargetSong)"><span class="material-icons-round">share</span> Share Link</div>
         `;
-        
-        // Keep the menu on-screen if they click near the bottom right edge
-        const menuHeight = 180; 
-        let yPos = e.pageY;
-        if (yPos + menuHeight > window.innerHeight) yPos = window.innerHeight - menuHeight;
-
-        menu.style.left = `${e.pageX - 10}px`; 
-        menu.style.top = `${yPos}px`;
-        menu.style.display = 'block'; 
+    } 
+    else {
+        return; // We didn't click anything important, do normal browser right-click
     }
+
+    // Apply HTML and show menu
+    menu.innerHTML = menuHtml;
+    
+    const menuHeight = 180; 
+    let yPos = e.pageY;
+    if (yPos + menuHeight > window.innerHeight) yPos = window.innerHeight - menuHeight;
+
+    menu.style.left = `${e.pageX}px`; 
+    menu.style.top = `${yPos}px`;
+    menu.style.display = 'block'; 
 });
 
-// 2. Safe Click Listener (Hide Menu)
+// 3. Safe Click Listener (Hide Menu)
 document.addEventListener('click', (e) => { 
     const menu = document.getElementById('custom-context-menu');
     if (menu && !e.target.closest('#custom-context-menu')) {
@@ -2725,15 +2717,13 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// 3. Context Menu Action Helpers
+// 4. Context Menu Action Helpers
 function playNextDirect(song) {
     queue.splice(curIdx + 1, 0, song);
     if (typeof draw === 'function') draw(); 
     if (typeof saveState === 'function') saveState();
     if (typeof showToast === 'function') showToast(`"${song.t}" will play next!`);
-    
-    const menu = document.getElementById('custom-context-menu');
-    if (menu) menu.style.display = 'none';
+    document.getElementById('custom-context-menu').style.display = 'none';
 }
 
 function addToQueueDirect(song) {
@@ -2741,14 +2731,11 @@ function addToQueueDirect(song) {
     if (typeof draw === 'function') draw(); 
     if (typeof saveState === 'function') saveState();
     if (typeof showToast === 'function') showToast(`"${song.t}" added to bottom of queue`);
-    
-    const menu = document.getElementById('custom-context-menu');
-    if (menu) menu.style.display = 'none';
+    document.getElementById('custom-context-menu').style.display = 'none';
 }
 
 function openPlaylistPicker(song) {
     let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
-    // Check if song already exists in the playlist
     if (!localPl.some(s => s.t === song.t)) {
         localPl.push(song);
         localStorage.setItem('myLocalPlaylist', JSON.stringify(localPl));
@@ -2756,105 +2743,21 @@ function openPlaylistPicker(song) {
     } else {
         if (typeof showToast === 'function') showToast("Already in favorites!");
     }
-    
-    const menu = document.getElementById('custom-context-menu');
-    if (menu) menu.style.display = 'none';
+    document.getElementById('custom-context-menu').style.display = 'none';
 }
 
 function removeFromQueue(index) {
     queue.splice(index, 1);
     if (index < curIdx) curIdx--;
     else if (index === curIdx && queue.length > 0) play(curIdx >= queue.length ? 0 : curIdx);
-    
     if (typeof draw === 'function') draw(); 
     if (typeof saveState === 'function') saveState();
-    
-    const menu = document.getElementById('custom-context-menu');
-    if (menu) menu.style.display = 'none';
+    document.getElementById('custom-context-menu').style.display = 'none';
 }
 
 function shareTrackDirect(song) {
     navigator.clipboard.writeText(`Listening to ${song.t} by ${song.a} on Pro Media Player!`);
     if (typeof showToast === 'function') showToast("Share text copied!");
-    
-    const menu = document.getElementById('custom-context-menu');
-    if (menu) menu.style.display = 'none';
-}
-
-function openLocalPlaylist() {
-    let localPl = JSON.parse(localStorage.getItem('myLocalPlaylist') || '[]');
-    document.body.classList.remove('player-mode'); switchView('playlist');
-    document.getElementById('pl-detail-title').innerText = "Local Favorites ❤️";
-    document.getElementById('pl-track-count').innerText = localPl.length;
-    document.getElementById('pl-detail-img').src = localPl.length > 0 ? localPl[0].cover : 'https://via.placeholder.com/230';
-    
-    const tracklistEl = document.getElementById('playlist-tracklist');
-    if (localPl.length === 0) {
-        tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);">Your favorites list is empty.<br>Right-click songs to add them!</div>`;
-        return;
-    }
-    currentLoadedPlaylist = localPl; 
-    let html = '';
-    localPl.forEach((song, i) => {
-        html += `<div class="track-row" onclick="playFromPlaylist(${i})">
-            <div class="track-num">${i + 1}</div>
-            <div style="display:flex; flex-direction:column; overflow:hidden;">
-                <span style="color:white; font-weight:bold; white-space:nowrap; text-overflow:ellipsis;">${song.t}</span>
-                <span style="color:var(--dim); font-size:0.85rem; white-space:nowrap; text-overflow:ellipsis;">${song.a}</span>
-            </div>
-            <span class="material-icons-round" style="color:#4cc2ff; font-size:18px;">favorite</span>
-        </div>`;
-    });
-    tracklistEl.innerHTML = html;
-}
-// ==========================================
-// --- NEW: MANUAL PLAYLIST IMPORTER ---
-// ==========================================
-
-async function importYTPlaylist() {
-    const input = document.getElementById('new-pl-input');
-    const url = input.value.trim();
-    if(!url) return;
-
-    // Extract the Playlist ID from the URL
-    let match = url.match(/[?&]list=([^&#]+)/) || url.match(/^([a-zA-Z0-9_-]+)$/);
-    if(!match) {
-        showToast("Invalid YouTube Playlist URL!");
-        return;
-    }
-    const plId = match[1];
-
-    showToast("Scraping Playlist Data...");
-    const btn = document.querySelector('button[onclick="importYTPlaylist()"]');
-    if (btn) btn.innerText = "Syncing...";
-
-    try {
-        // Fetch public metadata (No login required!)
-        const data = await ipcRenderer.invoke('get-yt-playlist', plId);
-        
-        if(!data || !data.songs) {
-            showToast("Failed to fetch. Is the playlist public?");
-            if (btn) btn.innerText = "+ Add Playlist";
-            return;
-        }
-
-        let saved = JSON.parse(localStorage.getItem('customYTPlaylists') || '[]');
-        if(saved.some(p => p.id === plId)) {
-            showToast("Playlist already added!");
-            input.value = '';
-            if (btn) btn.innerText = "+ Add Playlist";
-            return;
-        }
-
-        saved.push({ id: plId, title: data.name || data.title || "Custom Playlist" });
-        localStorage.setItem('customYTPlaylists', JSON.stringify(saved));
-        
-        input.value = '';
-        showToast(`Saved "${data.name || data.title || 'Playlist'}"!`);
-        renderSidebarPlaylists(); 
-    } catch (e) {
-        showToast("Scraping Error.");
-    }
-    if (btn) btn.innerText = "+ Add Playlist";
+    document.getElementById('custom-context-menu').style.display = 'none';
 }
 //yo
