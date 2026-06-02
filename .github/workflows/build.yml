@@ -22,8 +22,8 @@ jobs:
         run: npm install
 
       - name: Build Mac (.dmg) files
-        # 🔥 THE FIX: Added --x64 and --arm64 to generate TWO separate DMG installers
-        run: npx electron-builder --mac --x64 --arm64 --publish never
+        # Changed from separate --x64 and --arm64 targets to a single universal target
+        run: npx electron-builder --mac universal --publish never
 
       - name: Upload the final Mac apps
         uses: actions/upload-artifact@v4
