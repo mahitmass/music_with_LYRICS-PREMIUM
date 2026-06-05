@@ -507,3 +507,45 @@ body.retry-mode #retry-overlay { display: flex; opacity: 1; transform: translate
 .song-card.style-grid .grid-overlay .artist {
     font-size: 0.75rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* =========================================
+   AI BACKGROUND TASK SPINNER
+   ========================================= */
+@keyframes simple-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+#ai-task-indicator {
+    position: fixed;
+    bottom: 120px; /* Floats safely above the player controls */
+    left: 30px;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(15px);
+    border: 1px solid var(--accent);
+    padding: 12px 20px;
+    border-radius: 30px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: white;
+    font-size: 0.9rem;
+    font-weight: bold;
+    z-index: 10000;
+    opacity: 0;
+    transform: translateY(20px);
+    pointer-events: none; /* Allows you to click "through" it if needed */
+    transition: all 0.3s ease;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+}
+
+#ai-task-indicator.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.ai-spinner {
+    animation: simple-spin 1.5s linear infinite;
+    color: var(--accent);
+    font-size: 22px !important;
+}

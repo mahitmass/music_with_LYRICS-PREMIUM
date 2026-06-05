@@ -6,7 +6,6 @@ const { fork } = require('child_process');
 
 // We have removed YTMod and ytdl to stop the 403 Forbidden crashes
 
-
 app.commandLine.appendSwitch('js-flags', '--optimize_for_size --max_old_space_size=256');
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
@@ -55,9 +54,6 @@ if (!gotTheLock) {
         try { fs.unlinkSync(cookiePath); } catch(e) {}
     }
 
-    
-
-
     // ==========================================
     // --- INVINCIBLE INFINITE SCRAPER ---
     // ==========================================
@@ -93,11 +89,10 @@ if (!gotTheLock) {
             try { data = JSON.parse(html.slice(startIdx, endIdx)); } catch(e) { data = null; }
         }
 
-        // PLAN B: If blocked or parsing fails, try Piped API
         // PLAN B: If blocked or parsing fails, try Piped API Mirrors
         if (!data) {
             console.log("Engaging Plan B (Piped Mirrors)...");
-const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projectsegfau.lt", "https://piped-api.lunar.icu", "https://watchapi.whatever.social"];
+            const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projectsegfau.lt", "https://piped-api.lunar.icu", "https://watchapi.whatever.social"];
             let pipedData = null;
             
             for (const server of pipedServers) {
@@ -105,7 +100,7 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
                     const pipedRes = await fetch(`${server}/playlists/${playlistId}`);
                     if (pipedRes.ok) { 
                         pipedData = await pipedRes.json(); 
-                        break; // Stop looking once we find a working server!
+                        break; 
                     }
                 } catch(e) { console.log(`Server ${server} failed, trying next...`); }
             }
@@ -113,16 +108,14 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
             if (!pipedData) throw new Error("All Piped API servers are offline");
             
             let songs = pipedData.relatedStreams.map(s => {
-    // Piped usually stores the video ID in the 'url' string like "/watch?v=XXXXXX"
-    let videoId = s.url ? s.url.split('v=')[1] : null; 
-    
-    return {
-        name: s.title,
-        artists: [{ name: s.uploaderName }],
-        thumbnails: [{ url: s.thumbnail }],
-        ytId: videoId // MUST include this so the renderer knows what to play!
-    };
-});
+                let videoId = s.url ? s.url.split('v=')[1] : null; 
+                return {
+                    name: s.title,
+                    artists: [{ name: s.uploaderName }],
+                    thumbnails: [{ url: s.thumbnail }],
+                    ytId: videoId
+                };
+            });
             return { title: pipedData.name || title, songs };
         }
 
@@ -134,13 +127,12 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
                 let vid = item.playlistVideoRenderer;
                 if (vid && vid.title) {
                     let artist = vid.shortBylineText ? vid.shortBylineText.runs.map(r => r.text).join('') : "Unknown Artist";
-                    // NEW: We can extract the videoId here if you want to use it for streaming later!
                     let vId = vid.videoId; 
                     songs.push({
                         name: vid.title.runs[0].text,
                         artists: [{ name: artist }],
                         thumbnails: vid.thumbnail.thumbnails,
-                        ytId: vId // Saving the ID for the audio fetcher
+                        ytId: vId 
                     });
                 }
             });
@@ -156,10 +148,6 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
         let apiKey = apiKeyMatch ? apiKeyMatch[1] : null;
         let clientVer = clientVerMatch ? clientVerMatch[1] : "2.20240410.01.00"; 
 
-        // ==========================================
-        // NEW: RECURSIVE TOKEN HUNTER
-        // ==========================================
-        // This function searches every nested object until it finds the token
         function findToken(obj) {
             if (!obj || typeof obj !== 'object') return null;
             if (obj.continuationCommand?.token) return obj.continuationCommand.token;
@@ -173,10 +161,9 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
             return null;
         }
 
-        // Hunt for the initial token
         let token = findToken(listRenderer) || findToken(data);
-
         let pagesFetched = 0;
+
         while (token && apiKey && pagesFetched < 30) {
             pagesFetched++;
             console.log(`Fetching playlist page ${pagesFetched + 1}...`);
@@ -205,8 +192,6 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
             if (!appendItems) break;
 
             extractSongs(appendItems);
-            
-            // Hunt for the next token in the newly fetched data
             token = findToken(nextActions);
         }
 
@@ -219,104 +204,97 @@ const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projects
     });
 
     // ==========================================
-    // --- TASK 2: ISOLATED AI TRANSCRIPTION HANDLER ---
+    // --- TASK 2: NATIVE C++ AI TRANSCRIPTION ---
     // ==========================================
     ipcMain.handle('transcribe-audio', async (event, audioPath) => {
       let tempFilePath = null;
+      let tempWavPath = path.join(app.getPath('temp'), 'ai-audio-' + Date.now() + '.wav');
+
       try {
         let transcribePath = audioPath;
 
-        // If it's a URL, download it to a temporary file
         if (audioPath.startsWith('http')) {
           console.log("Downloading online stream for AI transcription...");
           tempFilePath = await downloadAudioToTemp(audioPath);
           transcribePath = tempFilePath;
         }
 
-        console.log("Starting isolated Whisper transcription for:", transcribePath);
+        console.log("Starting DIRECT ASYNC C++ Whisper transcription for:", transcribePath);
+
+        const cp = require('child_process');
+        // 🔥 THE MAGIC UN-FREEZER: We convert the synchronous exec into an asynchronous Promise!
+        const util = require('util');
+        const execAsync = util.promisify(cp.exec);
         
-        // Task 2: Isolate ShellJS and Whisper-Node in a completely detached child process
-        // This prevents the Electron main thread from crashing due to native compilation issues
-        return await new Promise((resolve) => {
-          // Path to a temporary runner script we'll create to isolate whisper
-          const runnerPath = path.join(app.getPath('temp'), 'whisper-runner.js');
-          
-          // Write the runner script
-          const runnerCode = `
-            try {
-              const shell = require('shelljs');
-              shell.config.execPath = process.execPath;
-              const whisper = require('whisper-node');
-              
-              whisper("${transcribePath.replace(/\\/g, '\\\\')}", {
-                modelName: "tiny.en",
-                whisperOptions: { language: 'en', gen_file_lrc: false, gen_file_txt: false }
-              }).then(transcript => {
-                let lrcText = "";
-                if (Array.isArray(transcript)) {
-                  transcript.forEach(line => {
-                    const ms = parseFloat(line.start);
-                    const m = Math.floor(ms / 60).toString().padStart(2, '0');
-                    const s = (ms % 60).toFixed(2).padStart(5, '0');
-                    lrcText += \`[$\{m}:\${s}] \${line.text.trim()}\\n\`;
-                  });
-                }
-                process.send({ status: 'success', lrc: lrcText });
-              }).catch(err => {
-                process.send({ status: 'error', message: err.message });
-              });
-            } catch (err) {
-              process.send({ status: 'error', message: "Compilation/Load error: " + err.message });
-            }
-          `;
-          
-          fs.writeFileSync(runnerPath, runnerCode);
-          
-          // Fork the process so it runs completely detached from the main Electron thread
-          const child = fork(runnerPath, [], {
-            env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-            stdio: ['pipe', 'pipe', 'pipe', 'ipc']
-          });
-          
-          child.on('message', (msg) => {
-            resolve(msg);
-            try { fs.unlinkSync(runnerPath); } catch(e) {}
-            child.kill();
-          });
-          
-          child.on('error', (err) => {
-            resolve({ 
-              status: 'error', 
-              success: false, 
-              error: "Child process failed to start. Local AI engine compilation failed.",
-              details: err.message 
+        let ffmpegPath = 'ffmpeg';
+        try { ffmpegPath = require('ffmpeg-static').replace(/\\\\/g, '/'); } catch(e) {}
+        
+        const whisperFolder = path.join(__dirname, 'node_modules', 'whisper-node', 'lib', 'whisper.cpp');
+        let mainExe = path.join(whisperFolder, 'whisper-cli.exe');
+        
+        if (!fs.existsSync(mainExe)) {
+            mainExe = path.join(whisperFolder, 'main.exe');
+        }
+
+        const modelPath = path.join(whisperFolder, 'models', 'ggml-tiny.en.bin');
+
+        if (!fs.existsSync(mainExe)) {
+            throw new Error("whisper-cli.exe not found! Make sure you pasted the files into the whisper.cpp folder.");
+        }
+
+        console.log("Converting audio to 16kHz WAV format (Async)...");
+        // 🔥 FIX 1: We use 'await execAsync' so the main UI never freezes during conversion
+        await execAsync(`"${ffmpegPath}" -y -i "${transcribePath}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
+
+        console.log("Running AI Engine (Async)...");
+        let output;
+        
+        try {
+            // 🔥 FIX 2: We use 'await execAsync' so you can keep clicking/scrolling during AI generation
+            const { stdout } = await execAsync(`"${mainExe}" -m "${modelPath}" -f "${tempWavPath}"`, { 
+                maxBuffer: 1024 * 1024 * 10 
             });
-            try { fs.unlinkSync(runnerPath); } catch(e) {}
-          });
-          
-          child.on('exit', (code) => {
-            if (code !== 0) {
-              resolve({ 
-                status: 'error', 
-                success: false, 
-                error: "AI engine crashed unexpectedly. Please install build-essential tools."
-              });
+            output = stdout.toString();
+        } catch (execErr) {
+            let errMessage = execErr.message;
+            if (execErr.stdout) errMessage += "\nSTDOUT: " + execErr.stdout.toString();
+            if (execErr.stderr) errMessage += "\nSTDERR: " + execErr.stderr.toString();
+            throw new Error("AI Execution Failed: " + errMessage);
+        }
+
+        let lrcText = "";
+        const lines = output.split('\n');
+        lines.forEach(line => {
+            let match = line.match(/\[(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->.*?\](.*)/);
+            if (match) {
+                let h = parseInt(match[1]);
+                let m = parseInt(match[2]);
+                let s = parseFloat(match[3] + '.' + match[4]);
+                
+                let totalMin = (h * 60) + m;
+                let mStr = totalMin.toString().padStart(2, '0');
+                let sStr = s.toFixed(2).padStart(5, '0');
+                let text = match[5].trim();
+                
+                if (text && !text.includes('[BLANK_AUDIO]')) {
+                    lrcText += `[${mStr}:${sStr}] ${text}\n`;
+                }
             }
-          });
         });
+
+        if (!lrcText.trim()) throw new Error("AI completed but no speech was detected.");
+
+        return { status: 'success', lrc: lrcText };
 
       } catch (error) {
         console.error("AI Transcription Error:", error);
-        return { 
-          status: 'error', 
-          success: false, 
-          error: "Failed to download or process audio stream.",
-          details: error.message 
-        };
+        return { status: 'error', success: false, error: "AI Engine failed", details: error.message };
       } finally {
-        // Task 2: Clean up temp file
+        if (fs.existsSync(tempWavPath)) {
+            try { fs.unlinkSync(tempWavPath); } catch(e) {}
+        }
         if (tempFilePath && fs.existsSync(tempFilePath)) {
-          try { fs.unlinkSync(tempFilePath); } catch(e) { console.error("Temp file cleanup failed:", e); }
+            try { fs.unlinkSync(tempFilePath); } catch(e) {}
         }
       }
     });
@@ -358,4 +336,3 @@ app.on('open-file', (event, filePath) => {
     win.webContents.send('open-external-file', filePath);
   }
 });
-///yo

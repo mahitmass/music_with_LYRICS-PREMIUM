@@ -9,6 +9,12 @@ function showToast(msg) {
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => toast.classList.remove('show'), 4000);
 }
+// BRIDGE FIX: Catches old inline right-clicks and prevents ReferenceErrors
+window.openSearchMenu = function(e) {
+    e.preventDefault(); 
+    // We leave this empty because the new Global Listener handles the actual menu!
+};
+
 function normalizeSaavnUrl(url) {
     if (!url) return '';
     return url.replace('aac.saavncdn.com', 'c.saavncdn.com');
@@ -1385,21 +1391,39 @@ let aiTaskQueue = [];
 let isAIBusy = false;
 let currentAITask = null;
 
-// Helper to update both AI buttons at once
+// Helper to update both AI buttons at once AND control the global floating spinner
 function updateAIButtons(display, title, isSpinning = false) {
     const btn1 = document.getElementById('btn-ai-sync');
     const btn2 = document.getElementById('main-ai-btn');
+    
     if (btn1) {
         btn1.style.display = display;
         btn1.title = title;
         btn1.innerText = isSpinning ? 'sync' : 'auto_awesome';
-        btn1.style.animation = isSpinning ? 'spin 2s linear infinite' : 'none';
+        btn1.style.animation = isSpinning ? 'simple-spin 1.5s linear infinite' : 'none';
     }
     if (btn2) {
         btn2.style.display = display;
         btn2.title = title;
         btn2.innerText = isSpinning ? 'sync' : 'auto_awesome';
-        btn2.style.animation = isSpinning ? 'spin 2s linear infinite' : 'none';
+        btn2.style.animation = isSpinning ? 'simple-spin 1.5s linear infinite' : 'none';
+    }
+
+    // --- NEW: Floating Global Background Spinner Logic ---
+    let indicator = document.getElementById('ai-task-indicator');
+    if (!indicator) {
+        // Dynamically create the UI element if it doesn't exist yet
+        indicator = document.createElement('div');
+        indicator.id = 'ai-task-indicator';
+        indicator.innerHTML = `<span class="material-icons-round ai-spinner">sync</span> <span id="ai-task-text">AI Generating...</span>`;
+        document.body.appendChild(indicator);
+    }
+
+    if (isSpinning) {
+        indicator.classList.add('show');
+        document.getElementById('ai-task-text').innerText = title || "AI is working in background...";
+    } else {
+        indicator.classList.remove('show');
     }
 }
 
@@ -1573,15 +1597,16 @@ function triggerManualAIGeneration() {
 
 async function generateAILyrics(song) {
     try {
-        updateAIButtons('block', 'AI is working...', true);
+        updateAIButtons('block', 'AI Engine is running...', true);
         
-        // Task 1: Use main process IPC for high-efficiency transcription (handles URLs safely)
+        // Tells the Node/C++ backend to handle all the heavy lifting!
         const result = await ipcRenderer.invoke('transcribe-audio', song.p);
         
         if (result.status === 'success') {
             return { lrc: result.lrc, song: song };
         } else {
-            throw new Error(result.message || "Transcription failed");
+            // Extracts the exact crash reason from main.js if FFmpeg or main.exe fails
+            throw new Error(result.message || result.details || "Transcription failed");
         }
     } catch (error) {
         console.error("Renderer AI Error:", error);
@@ -1589,7 +1614,25 @@ async function generateAILyrics(song) {
     }
 }
 
-    // --- FETCH LYRICS ---
+// IPC handler for status updates from main process
+ipcRenderer.on('ai-transcription-status', (event, { status, message, songPath }) => {
+  // Only update UI if the message is for the currently playing song
+  if (queue[curIdx] && (queue[curIdx].p === songPath || queue[curIdx].id === songPath || queue[curIdx].ytId === songPath)) {
+    if (status === 'loading' || status === 'transcribing') {
+      updateAIButtons('block', message, true);
+      lContent.innerHTML = `<p class="lyric-line" style="opacity: 1; filter: blur(0px);">${message}</p>`;
+    } else if (status === 'error') {
+      showToast(`AI Error for "${currentAITask?.t || 'song'}": ${message}`);
+      updateAIButtons('block', 'Retry AI Generation', false);
+      lContent.innerHTML = `<p class="lyric-line" style="opacity: 1; filter:blur(0); color:#ff4c4c;">AI Error: ${message}</p>`;
+    } else if (status === 'done') {
+      // This case is handled by the `generateAILyrics` promise resolution
+      // No need to update buttons here as it will be reset by the `processNextAITask` cleanup
+    }
+  }
+});
+
+// --- FETCH LYRICS ---
 async function getLyrics(s) {
   if (!lyricsEnabled) {
     lyrics = [];
@@ -1878,8 +1921,7 @@ function handleManualScroll(e) {
     const ps = document.getElementsByClassName('lyric-line');
     const lView = document.getElementById('l-view');
     if (lView && typeof lyrIdx !== 'undefined' && lyrIdx >= 0 && ps[lyrIdx]) {
-        lView.scrollTo({top: ps[lyrIdx].offsetTop - (lView.clientHeight / 3.5), behavior:'smooth'});
-    }
+    lView.scrollTo({top: ps[act].offsetTop - (lView.clientHeight / 3.5), behavior:'smooth'});    }
     }, 2000);
 }
 
