@@ -611,7 +611,7 @@ function play(i) {
         tryPlayWithRetry(s, 0);
 
     } else {
-        safePlay(encodeURI(`file://${s.p.replace(/\\/g, '/')}`));
+        safePlay(encodeURI(`file://${s.p.replace(/\\/g, '/')}`).replace(/#/g, '%23').replace(/\?/g, '%3F'));
         if (typeof extractAlbumArt === 'function') extractAlbumArt(s);
     }
 
@@ -1302,7 +1302,7 @@ function tryPlayWithRetry(song, attempt) {
 function extractAlbumArt(song) {
     const coverImg = document.getElementById('album-cover');
     const bgBlur = document.getElementById('bg-blur');
-    fetch(`file://${song.p.replace(/\\/g, '/')}`).then(res => res.blob()).then(blob => {
+        fetch(encodeURI(`file://${song.p.replace(/\\/g, '/')}`).replace(/#/g, '%23').replace(/\?/g, '%3F')).then(res => res.blob()).then(blob => {
         window.jsmediatags.read(blob, {
         onSuccess: function(tag) {
             const picture = tag.tags.picture;
