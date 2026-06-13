@@ -97,6 +97,19 @@
     </nav>
 
     <main class="yt-content">
+      <div class="top-nav-bar" style="position: absolute; top: 20px; right: 30px; z-index: 100;">
+            <button class="yt-btn-secondary" onclick="openHistoryView()" style="padding: 8px 20px; font-size: 0.9rem; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);">
+                <span class="material-icons-round" style="font-size: 18px;">history</span> History
+            </button>
+        </div>
+
+        <div id="view-history" class="view-panel">
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 30px;">
+                <button class="yt-btn-secondary" onclick="switchToHomeView()" style="padding: 10px; border-radius: 50%;"><span class="material-icons-round">arrow_back</span></button>
+                <h1 style="font-size: 2.5rem; font-weight: 900; margin: 0;">Listening History</h1>
+            </div>
+            <div id="history-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+        </div>
       
       <div id="view-home" class="view-panel active">
         <h1 class="page-title" style="font-size: 3rem; font-weight: 900; margin-bottom: 30px;">Explore</h1>
@@ -120,6 +133,17 @@
       </div>
 
       <div id="view-player" class="view-panel" style="position:relative; overflow:hidden; padding: 0;">
+        <div class="zen-exit-hint">Double-Click to Exit Zen Mode</div>
+        <div id="cyber-visualizer" class="cyber-vis-container">
+            <div class="cyber-left">
+                <div class="cyber-text">FREQ: 14.2kHz<br>BASS: MAX<br>SYNC: ON</div>
+                <canvas id="vis-canvas-left" width="120" height="120"></canvas>
+            </div>
+            <div class="cyber-right">
+                <div class="cyber-text">BPM: 128<br>TEMPO: +2.4%<br>SYS: STABLE</div>
+                <canvas id="vis-canvas-right" width="120" height="120"></canvas>
+            </div>
+        </div>
         <img id="album-cover" class="album-cover" src="" style="display: none;">
         <div class="immersive-search-wrap">
           <input type="text" id="imm-search" placeholder="Search in queue + online..." oninput="filterQueue(this.value, 'imm-search-results', true)">
@@ -156,7 +180,7 @@
   </aside>
   
   <span class="material-icons-round queue-hint">chevron_left</span>
-
+<div class="player-hover-hitbox"></div>
   <footer class="yt-player-bar">
     <div class="info" onclick="switchView('player')">
       <div class="display-title" id="cur-t">No Song</div>
@@ -174,6 +198,7 @@
             <span class="material-icons-round ctrl-icon" id="options-trigger" onclick="toggleMenu()" title="More Options">more_vert</span>
             <div id="track-options-dropdown" class="dropdown-content" style="display: none; position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); min-width: 160px; z-index: 60; border: 1px solid #333; border-radius: 8px; background: #222;">
               <a onclick="shareTrack()">Share Link</a>
+              <a onclick="document.getElementById('shortcuts-modal').style.display='flex'"><span class="material-icons-round">keyboard</span> Keyboard Shortcuts</a>
               <a onclick="downloadTrack()">Download MP3</a>
               <a onclick="saveToPlaylist()">Save to Playlist</a>
             </div>
@@ -195,6 +220,7 @@
   </footer>
 
   <audio id="player"></audio>
+  
   <script src="renderer.js"></script>
 <script src="tutorial.js"></script>
   <div id="custom-context-menu" class="context-menu">
@@ -203,5 +229,23 @@
       <div class="context-item" id="ctx-save-local"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
       <div class="context-item" id="ctx-share"><span class="material-icons-round">share</span> Share Link</div>
   </div>
+  <div id="shortcuts-modal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:20000; justify-content:center; align-items:center; backdrop-filter:blur(10px);">
+    <div style="background:#1b1b1b; padding:30px; border-radius:12px; width:450px; border:1px solid #333; position:relative; box-shadow: 0 20px 50px rgba(0,0,0,0.8);">
+        <span class="material-icons-round" onclick="document.getElementById('shortcuts-modal').style.display='none'" style="position:absolute; top:15px; right:15px; cursor:pointer; color:#aaa; font-size: 24px; transition: 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#aaa'">close</span>
+        <h2 style="margin-top:0; margin-bottom:20px; font-size:1.5rem; color: white;">Keyboard Shortcuts</h2>
+        <div style="display:grid; grid-template-columns: 120px 1fr; gap:12px; color:#ddd; font-size:0.95rem; line-height: 1.5;">
+            <b style="color: var(--accent);">Spacebar</b> <span>Play / Pause</span>
+            <b style="color: var(--accent);">Arrows L / R</b> <span>Seek -/+ 10 Seconds</span>
+            <b style="color: var(--accent);">Arrows U / D</b> <span>Volume +/- 5%</span>
+            <b style="color: var(--accent);">M</b> <span>Toggle Immersive View</span>
+            <b style="color: var(--accent);">R</b> <span>Retry / Search Lyrics</span>
+            <b style="color: var(--accent);">S</b> <span>Focus Search Bar</span>
+            <b style="color: var(--accent);">X</b> <span>Block Lyrics</span>
+            <b style="color: var(--accent);">T</b> <span>Toggle CPU Lyrics</span>
+            <b style="color: var(--accent);">Z</b> <span>Shuffle Remaining Queue</span>
+            <b style="color: var(--accent);">Esc</b> <span>Close Search / Unfocus</span>
+        </div>
+    </div>
+</div>
 </body>
 </html>
