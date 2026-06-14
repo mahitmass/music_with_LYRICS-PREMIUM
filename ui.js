@@ -578,15 +578,18 @@ function initRealVisualizer() {
 }
 
 function drawRealWaveform() {
-    requestAnimationFrame(drawRealWaveform);
-
+    // 🔥 PERFORMANCE FIX: If we aren't in Cyberpunk mode, KILL THE LOOP ENTIRELY!
     if (!document.body.classList.contains('imm-layout-1')) {
+        isDrawingWaveform = false;
         if (ctxLeft && ctxRight) {
             ctxLeft.clearRect(0, 0, canvasLeft.width, canvasLeft.height);
             ctxRight.clearRect(0, 0, canvasRight.width, canvasRight.height);
         }
-        return;
+        return; // Stops requesting new frames!
     }
+
+    // Schedule the next frame only if we made it past the sleep check
+    requestAnimationFrame(drawRealWaveform);
 
     if (!visDataArray) return;
     analyser.getByteFrequencyData(visDataArray);
@@ -597,6 +600,7 @@ function drawRealWaveform() {
     let gradLeft = ctxLeft.createLinearGradient(canvasLeft.width, 0, 0, 0);
     gradLeft.addColorStop(0, activeVisColor + ' 0.8)');
     gradLeft.addColorStop(1, activeVisColor + ' 0.0)');
+
     let gradRight = ctxRight.createLinearGradient(0, 0, canvasRight.width, 0);
     gradRight.addColorStop(0, activeVisColor + ' 0.8)');
     gradRight.addColorStop(1, activeVisColor + ' 0.0)');
@@ -609,15 +613,22 @@ function drawRealWaveform() {
     const sliceHeight = canvasLeft.height / (usefulData.length - 1);
     let pointsLeft = [], pointsRight = [];
 
+    // Check if the audio is mostly silent. If so, draw a flat line and skip the expensive bezier curves!
+    let totalActivity = 0;
+
     for (let i = 0; i < usefulData.length; i++) {
         let rawVal = usefulData[i];
         if (rawVal < 20) rawVal = 0;
+        totalActivity += rawVal;
         let v = Math.pow(rawVal / 255, 1.5);
         let spikeWidth = v * canvasLeft.width;
         let y = i * sliceHeight;
         pointsLeft.push({ x: canvasLeft.width - spikeWidth, y: y });
         pointsRight.push({ x: spikeWidth, y: y });
     }
+
+    // 🔥 PERFORMANCE FIX: If it's pure silence, skip drawing entirely to save GPU processing
+    if (totalActivity === 0) return;
 
     function drawSmoothCurve(ctx, points, isLeft) {
         ctx.beginPath();

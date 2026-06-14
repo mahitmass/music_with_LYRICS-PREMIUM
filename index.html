@@ -60,11 +60,10 @@
       <div class="sidebar-section playlist-section">
         <h3>My Library</h3>
         <div class="playlist-links" id="sidebar-playlists">
-          </div>
+          </div>  
         
         <div style="padding: 10px 20px; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 10px;">
-          <input type="text" id="new-pl-input" placeholder="Paste YT Playlist URL..." style="width:100%; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); color:white; padding:8px 12px; border-radius:6px; margin-bottom:8px; font-size:0.8rem;">
-          <button onclick="importYTPlaylist()" style="width:100%; background:rgba(76,194,255,0.1); border:1px solid var(--accent); color:var(--accent); padding:8px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:0.8rem; transition: 0.2s;">+ Add Playlist</button>
+          <button onclick="importYTPlaylist()" style="width:100%; background:rgba(76,194,255,0.1); border:1px solid var(--accent); color:var(--accent); padding:8px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:0.85rem; transition: 0.2s;">+ Add YT Playlist</button>
         </div>
       </div>
       
@@ -104,12 +103,14 @@
         </div>
 
         <div id="view-history" class="view-panel">
-            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 30px;">
-                <button class="yt-btn-secondary" onclick="switchToHomeView()" style="padding: 10px; border-radius: 50%;"><span class="material-icons-round">arrow_back</span></button>
-                <h1 style="font-size: 2.5rem; font-weight: 900; margin: 0;">Listening History</h1>
-            </div>
-            <div id="history-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+        
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; padding-bottom: 15px; padding-top: 10px; position: sticky; top: 0; z-index: 110; background: rgba(18, 18, 18, 0.85); backdrop-filter: blur(12px);">
+            <button class="yt-btn-secondary" onclick="switchToHomeView()" style="padding: 10px; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.5);"><span class="material-icons-round">arrow_back</span></button>
+            <h1 style="font-size: 2.5rem; font-weight: 900; margin: 0;">Listening History</h1>
         </div>
+
+        <div id="history-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+      </div>
       
       <div id="view-home" class="view-panel active">
         <h1 class="page-title" style="font-size: 3rem; font-weight: 900; margin-bottom: 30px;">Explore</h1>

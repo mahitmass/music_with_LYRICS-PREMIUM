@@ -557,15 +557,18 @@ body.immersive .yt-player-bar { position: fixed !important; bottom: 0; left: 0; 
     position: absolute; top: 120px; left: 0; width: 100vw; height: 250px;
     display: flex; justify-content: space-between; padding: 0 8vw;
     pointer-events: none !important; opacity: 0; transition: opacity 0.5s ease; z-index: 2;
+    /* 🔥 PERFORMANCE FIX: Force display:none so the GPU doesn't process it in the background */
+    display: none;
 }
 .cyber-text { color: rgba(255, 255, 255, 0.6); font-family: monospace; font-size: 13px; letter-spacing: 1px; margin-bottom: 10px; }
 .cyber-right .cyber-text { text-align: right; }
 .cyber-left canvas, .cyber-right canvas {
     pointer-events: none !important; 
     height: 120px; 
-    mix-blend-mode: overlay; /* Absorbs the album art colors! */
+    mix-blend-mode: overlay; 
     opacity: 0.9;
     filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.6));
+    will-change: transform; /* Hardware acceleration hint */
 }
 
 /* ==========================================
@@ -591,7 +594,11 @@ body.imm-layout-1 .lyrics-view {
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
 }
 
-body.immersive.imm-layout-1 .cyber-vis-container { opacity: 1 !important; z-index: 50 !important; }
+body.immersive.imm-layout-1 .cyber-vis-container { 
+    display: flex; /* Wake it up */
+    opacity: 1 !important; 
+    z-index: 50 !important; 
+}
 
 body.immersive.imm-layout-1 .yt-player-bar { transform: translateY(150px) !important; transition: 0.5s ease; opacity: 0; pointer-events: none; }
 body.immersive.imm-layout-1 .immersive-search-wrap, body.immersive.imm-layout-1 .nav-back-btn { opacity: 0; pointer-events: none; }
@@ -813,6 +820,10 @@ body.immersive.is-paused .lyric-tools,
 body:has(.player-hover-hitbox:hover) .lyric-tools,
 body:has(.yt-player-bar:hover) .lyric-tools {
     bottom: 120px !important;
+}
+/* 🔥 THE FIX: Hide the top History button when the History tab is already open */
+body:has(#view-history.active) .top-nav-bar {
+    display: none !important;
 }
 
 
