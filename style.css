@@ -549,19 +549,8 @@ body.immersive .queue-hint { display: block; }
 /* Ensure the app is strictly 100vh in immersive mode */
 body.immersive .app-layout { height: 100vh !important; }
 
-/* 🔥 FIX: Extreme Z-Index so the player bar is NEVER blocked */
+/* Extreme Z-Index so the player bar is NEVER blocked */
 body.immersive .yt-player-bar { position: fixed !important; bottom: 0; left: 0; width: 100vw; z-index: 10000 !important; }
-
-/* THE HOVER HITBOX */
-/* 🔥 FIX: Extreme Z-Index + forced pointer-events so it always feels your mouse */
-.player-hover-hitbox { display: none; position: fixed; bottom: 0; left: 0; width: 100vw; height: 140px; z-index: 9999 !important; pointer-events: auto !important; }
-body.immersive.imm-layout-1 .player-hover-hitbox, body.immersive.imm-layout-2 .player-hover-hitbox { display: block; }
-
-.player-hover-hitbox:hover + .yt-player-bar,
-body.immersive.imm-layout-1 .yt-player-bar:hover,
-body.immersive.imm-layout-2 .yt-player-bar:hover {
-    transform: translateY(0) !important; opacity: 1 !important; pointer-events: auto !important;
-}
 
 /* THE CYBERPUNK VISUALIZER COMPONENTS */
 .cyber-vis-container {
@@ -629,14 +618,39 @@ body.immersive.imm-layout-2 .immersive-search-wrap, body.immersive.imm-layout-2 
 body.imm-layout-2 .zen-exit-hint { opacity: 1; }
 
 /* ==========================================
-   🔥 THE FIX: THE HOVER HITBOX & PAUSE LOGIC
+   🔥 FIX: THE HOVER HITBOX & PAUSE LOGIC
    ========================================== */
-.player-hover-hitbox { display: none; position: fixed; bottom: 0; left: 0; width: 100vw; height: 140px; z-index: 9999 !important; pointer-events: auto !important; }
+/* The single, correct 180px definition */
+.player-hover-hitbox { display: none; position: fixed; bottom: 0; left: 0; width: 100vw; height: 180px; z-index: 9999 !important; pointer-events: auto !important; }
 body.immersive.imm-layout-1 .player-hover-hitbox, body.immersive.imm-layout-2 .player-hover-hitbox { display: block; }
 
 body.immersive.is-paused .yt-player-bar,
 body.immersive .player-hover-hitbox:hover ~ .yt-player-bar,
 body.immersive .yt-player-bar:hover {
+    transform: translateY(0) !important; opacity: 1 !important; pointer-events: auto !important;
+}
+
+/* ==========================================
+   🔥 FIX: DYNAMIC LYRIC TOOLS POSITIONING
+   ========================================== */
+body.immersive .lyric-tools { position: fixed !important; right: 40px !important; transition: bottom 0.5s ease !important; z-index: 10001 !important; }
+
+/* Classic Mode: Always above the 100px playback bar */
+body.immersive:not(.imm-layout-1):not(.imm-layout-2) .lyric-tools { bottom: 120px !important; }
+
+/* Mode 1 & 2: Rest flush at the bottom */
+body.imm-layout-1 .lyric-tools, body.imm-layout-2 .lyric-tools { bottom: 30px !important; }
+
+/* Mode 1 & 2: Slide up perfectly when playback controls appear! */
+body.immersive.is-paused .lyric-tools,
+body:has(.player-hover-hitbox:hover) .lyric-tools,
+body:has(.yt-player-bar:hover) .lyric-tools,
+body:has(.lyric-tools:hover) .lyric-tools {
+    bottom: 120px !important;
+}
+
+/* Force the player bar to stay up if you hover the lyric tools directly */
+body.immersive:has(.lyric-tools:hover) .yt-player-bar {
     transform: translateY(0) !important; opacity: 1 !important; pointer-events: auto !important;
 }
 
