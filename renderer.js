@@ -1182,8 +1182,8 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'MediaTrackNext') playNext();
     if (e.key === 'MediaTrackPrevious') playPrev();
     if (e.key === 'MediaPlayPause') togglePlay();
-    if (e.key === 'ArrowRight') { if (audio.duration) audio.currentTime = Math.min(audio.duration, audio.currentTime + 10); }
-    if (e.key === 'ArrowLeft') { if (audio.duration) audio.currentTime = Math.max(0, audio.currentTime - 10); }
+    if (e.key === 'ArrowRight') { if (audio.duration) audio.currentTime = Math.min(audio.duration, audio.currentTime + 1.5); }
+    if (e.key === 'ArrowLeft') { if (audio.duration) audio.currentTime = Math.max(0, audio.currentTime - 1.5); }
 });
 
 // ==========================================
