@@ -43,7 +43,7 @@ Most modern players are either too heavy, hide synced lyrics behind a subscripti
 
 ---
 
-### 笨ｨ AI & Smart Sync Features
+###  AI & Smart Sync Features
 * **Interactive Tour**: Click the **Keyboard Shortcuts** menu and use the `?` tooltips to take a live, interactive spotlight tour of every feature in the app.
 * **Background AI Queue**: Queue up multiple plain-text songs for AI synchronization. The app processes them sequentially in the background without freezing your music.
 * **"Rubber Band" Interpolation**: Custom AI logic that anchors known words and mathematically stretches the timestamps in between, making it impossible for fast songs to drift out of sync.
@@ -52,7 +52,7 @@ Most modern players are either too heavy, hide synced lyrics behind a subscripti
 
 ---
 
-### 而 Key Player Features
+### 🎧 Key Player Features
 * **Cinematic Idle Fade**: If left idle for 5 minutes, UI elements fade out for a distraction-free "Screenshot Mode."
 * **Precision Auto-Scroller**: Automatically snaps the playing song to the center of your queue.
 * **Advanced Manual Sync**: Dial in timing perfectly. Hold `+` / `-` to shift, or type an exact offset (e.g., `-2.5s`).
@@ -62,7 +62,7 @@ Most modern players are either too heavy, hide synced lyrics behind a subscripti
 
 ---
 
-### 屏 Technical Stack
+### 🛠 Technical Stack
 * **Framework:** Electron.js (Node.js & Chromium)
 * **Frontend:** Vanilla JavaScript, HTML5, CSS3
 * **Audio:** HTML5 Audio API & Web Audio API
