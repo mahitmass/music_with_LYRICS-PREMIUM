@@ -202,7 +202,7 @@
             <span class="material-icons-round ctrl-icon" id="options-trigger" onclick="toggleMenu()" title="More Options">more_vert</span>
             <div id="track-options-dropdown" class="dropdown-content" style="display: none; position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); min-width: 160px; z-index: 60; border: 1px solid #333; border-radius: 8px; background: #222;">
               <a onclick="shareTrack()">Share Link</a>
-              <a onclick="document.getElementById('shortcuts-modal').style.display='flex'"><span class="material-icons-round">keyboard</span> Keyboard Shortcuts</a>
+              <a onclick="window.openEnhancedShortcutsWindow()"><span class="material-icons-round">keyboard</span>Shortcuts & Help</a>              
               <a onclick="downloadTrack()">Download MP3</a>
               <a onclick="saveToPlaylist()">Save to Playlist</a>
             </div>
@@ -213,6 +213,7 @@
         <small id="c-time" style="width:40px; text-align:right; color:var(--dim);">0:00</small>
         <div class="progress-bar" id="pb"><div class="progress-fill" id="fill"></div></div>
         <small id="t-time" style="width:40px; color:var(--dim);">0:00</small>
+        <small id="buffer-pct" style="display:none; color:var(--accent); font-weight:bold; min-width:35px; text-align:left; font-size:0.85rem;">0%</small>
       </div>
     </div>
 
@@ -224,6 +225,7 @@
   </footer>
 
   <audio id="player"></audio>
+  <script src="home.js"></script>
   <script src="lyrics.js"></script>
   <script src="playlist.js"></script>
   <script src="ui.js"></script>
@@ -236,7 +238,7 @@
       <div class="context-item" id="ctx-share"><span class="material-icons-round">share</span> Share Link</div>
   </div>
   <div id="shortcuts-modal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:20000; justify-content:center; align-items:center; backdrop-filter:blur(10px);">
-    <div style="background:#1b1b1b; padding:30px; border-radius:12px; width:450px; border:1px solid #333; position:relative; box-shadow: 0 20px 50px rgba(0,0,0,0.8);">
+    <div style="background:#1b1b1b; padding:30px; border-radius:12px; width:480px; max-height: 85vh; overflow-y: auto; border:1px solid #333; position:relative; box-shadow: 0 20px 50px rgba(0,0,0,0.8); scroll-behavior: smooth;" id="shortcuts-scroll-box">
         <span class="material-icons-round" onclick="document.getElementById('shortcuts-modal').style.display='none'" style="position:absolute; top:15px; right:15px; cursor:pointer; color:#aaa; font-size: 24px; transition: 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#aaa'">close</span>
         <h2 style="margin-top:0; margin-bottom:20px; font-size:1.5rem; color: white;">Keyboard Shortcuts</h2>
         <div style="display:grid; grid-template-columns: 120px 1fr; gap:12px; color:#ddd; font-size:0.95rem; line-height: 1.5;">
@@ -251,7 +253,53 @@
             <b style="color: var(--accent);">Z</b> <span>Shuffle Remaining Queue</span>
             <b style="color: var(--accent);">Esc</b> <span>Close Search / Unfocus</span>
         </div>
-    </div>
+
+        <div style="position: relative; margin: 35px 0 25px; border-top: 1px dashed rgba(76,194,255,0.4); display: flex; justify-content: center;" onclick="document.getElementById('shortcuts-scroll-box').scrollTo({top: 800, behavior: 'smooth'});">
+            <span class="material-icons-round" style="position: absolute; top: -14px; background: #1b1b1b; color: var(--accent); padding: 0 10px; font-size: 20px; cursor: pointer;">keyboard_double_arrow_down</span>
+        </div>
+
+        <div style="padding-top: 5px;">
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: bold; font-size: 1rem; color: #fff; display: flex; align-items: center;">
+                    Immersive Mode Switcher
+                    <button onclick="window.interactiveFeatureTour('album-cover')" style="background: rgba(76,194,255,0.1); color: var(--accent); border: 1px solid rgba(76,194,255,0.3); width: 24px; height: 24px; border-radius: 50%; cursor: pointer; margin-left: 10px; font-weight: 900;" title="Take interactive tour">?</button>
+                </div>
+                <div style="color: #aaa; font-size: 0.85rem; margin-top: 3px; line-height: 1.4;">Clicking the album cover inside the Immersive Lyrics view dynamically swaps themes between Classic UI, Cyberpunk, and Zen mode.</div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: bold; font-size: 1rem; color: #fff; display: flex; align-items: center;">
+                    Lyrics Synchronization
+                    <button onclick="window.interactiveFeatureTour('lyrics-controls')" style="background: rgba(76,194,255,0.1); color: var(--accent); border: 1px solid rgba(76,194,255,0.3); width: 24px; height: 24px; border-radius: 50%; cursor: pointer; margin-left: 10px; font-weight: 900;" title="Take interactive tour">?</button>
+                </div>
+                <div style="color: #aaa; font-size: 0.85rem; margin-top: 3px; line-height: 1.4;">The bottom-right tools in Immersive Mode let you adjust sync offsets, fetch alternative lyrics, or edit them manually.</div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: bold; font-size: 1rem; color: #fff; display: flex; align-items: center;">
+                    Playlist Import Tool
+                    <button onclick="window.interactiveFeatureTour('playlist-import')" style="background: rgba(76,194,255,0.1); color: var(--accent); border: 1px solid rgba(76,194,255,0.3); width: 24px; height: 24px; border-radius: 50%; cursor: pointer; margin-left: 10px; font-weight: 900;" title="Take interactive tour">?</button>
+                </div>
+                <div style="color: #aaa; font-size: 0.85rem; margin-top: 3px; line-height: 1.4;">Click "+ Add YT Playlist" in the sidebar to scrape and import massive tracklists directly from YouTube Music.</div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: bold; font-size: 1rem; color: #fff; display: flex; align-items: center;">
+                    Local Media Control
+                    <button onclick="window.interactiveFeatureTour('normal-toolbar')" style="background: rgba(76,194,255,0.1); color: var(--accent); border: 1px solid rgba(76,194,255,0.3); width: 24px; height: 24px; border-radius: 50%; cursor: pointer; margin-left: 10px; font-weight: 900;" title="Take interactive tour">?</button>
+                </div>
+                <div style="color: #aaa; font-size: 0.85rem; margin-top: 3px; line-height: 1.4;">Use the tiny buttons above your local queue to load entire folders, add files, or safely clear the current queue.</div>
+            </div>
+
+            <div style="margin-bottom: 5px;">
+                <div style="font-weight: bold; font-size: 1rem; color: #fff; display: flex; align-items: center;">
+                    Smart History Engine
+                    <button onclick="window.interactiveFeatureTour('history-tab')" style="background: rgba(76,194,255,0.1); color: var(--accent); border: 1px solid rgba(76,194,255,0.3); width: 24px; height: 24px; border-radius: 50%; cursor: pointer; margin-left: 10px; font-weight: 900;" title="Take interactive tour">?</button>
+                </div>
+                <div style="color: #aaa; font-size: 0.85rem; margin-top: 3px; line-height: 1.4;">Your history tab feeds the AI profiler, calculating genre velocities and time-of-day vibes to generate your Explore page.</div>
+            </div>
+        </div>
+        </div>
 </div>
 </body>
 </html>

@@ -490,6 +490,7 @@ body.immersive .hover-queue-hitbox { display: block !important; }
     transition: right 0.3s ease-in-out !important;
     padding: 20px; z-index: 100;
     display: flex; flex-direction: column;
+    z-index: 10005 !important;
 }
 
 /* Physically forbids the side queue from appearing on the Homepage */
@@ -826,71 +827,10 @@ body:has(#view-history.active) .top-nav-bar {
     display: none !important;
 }
 
+/* 🔥 NEW: Keeps the immersive queue open while right-clicking */
+body.lock-hover-queue #hover-q {
+    right: 0 !important;
+}
+
 
 /*yo*/
-
-
-/* =====================================================================
-   DUPLICATES / SPLIT RULES (merged above — kept here for reference)
-   ===================================================================== */
-
-/*
-   DUPLICATE: .menu-item transition
-   Original location 1 (no transition, basic):
-       .menu-item { ... transition: 0.2s; ... }
-   Original location 2 (animation block):
-       .menu-item { transition: transform 0.2s ease, background 0.2s ease; }
-       .menu-item:hover { transform: translateX(8px); background: rgba(255,255,255,0.1); }
-   → MERGED into the single .menu-item block above.
-*/
-
-/*
-   DUPLICATE: .song-card transition / hover
-   Original location 1 (base block):
-       .song-card { ... transition: all 0.3s ease; ... }
-       .song-card:hover { background: rgba(255,255,255,0.08); transform: translateY(-5px); box-shadow: 0 10px 20px ... }
-   Original location 2 (animation block):
-       .song-card { transition: transform 0.3s cubic-bezier(...), box-shadow 0.3s ease; }
-       .song-card:hover { transform: translateY(-8px) scale(1.02); box-shadow: 0 15px 30px ...; }
-   → MERGED into the single .song-card block above (kept the more specific cubic-bezier version).
-*/
-
-/*
-   DUPLICATE: .track-row transition / hover
-   Original location 1 (playlist view):
-       .track-row { ... transition: 0.2s; ... }
-       .track-row:hover { background: rgba(255,255,255,0.1); }
-   Original location 2 (animation block):
-       .track-row { transition: transform 0.2s cubic-bezier(...), background 0.2s, box-shadow 0.2s; }
-       .track-row:hover { transform: scale(1.01) translateY(-2px); background: ...; box-shadow: ...; }
-   → MERGED into the single .track-row block above.
-*/
-
-/*
-   DUPLICATE: #sidebar-search transition
-   Original location 1 (sidebar block):
-       #sidebar-search { ... } — no transition declared
-   Original location 2 (animation block):
-       #sidebar-search { transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
-       #sidebar-search:focus { transform: scale(1.03); ... }
-   → MERGED into the single #sidebar-search block above.
-*/
-
-/*
-   DUPLICATE / SPLIT: .info { min-width: 0; overflow: hidden; }
-   Declared once in queue-text-wrap/info shared block, then again separately.
-   → MERGED into the .info block above.
-*/
-
-/*
-   DUPLICATE: @keyframes toast-bounce declared TWICE with slightly different end values:
-   Version 1: bottom: 120px (inside original #toast.show block)
-   Version 2: bottom: 95px  (inside animation polish block)
-   → Kept version 2 (95px) in the active block above. Version 1 preserved here:
-
-   @keyframes toast-bounce {
-       0%   { bottom: 20px; opacity: 0; }
-       100% { bottom: 120px; opacity: 1; }
-   }
-    yo
-   */

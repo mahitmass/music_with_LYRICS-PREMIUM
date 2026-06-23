@@ -12,6 +12,11 @@
 //       as shared globals. This file only USES them.
 
 // AI Task state (shared with renderer via window scope)
+// 🔥 NEW: Flawless Unique ID generator for lyrics sync & saving
+function getLyricTrackId(s) {
+    if (!s) return 'unknown';
+    return s.ytId || s.id || (s.isOnline ? s.t + '::' + s.a : s.p);
+}
 let aiWorker = null;
 let aiTaskQueue = [];
 let isAIBusy = false;
@@ -87,12 +92,16 @@ function toggleLyrics() {
 // --- TOGGLE NO LYRICS (BLOCK FOR TRACK) ---
 // ==========================================
 function toggleNoLyrics() {
-    let block = localStorage.getItem('noLyr_' + currentSongId);
+    const s = queue[curIdx];
+    if (!s) return;
+    const uid = getLyricTrackId(s);
+    let block = localStorage.getItem('noLyr_' + uid);
     if (block) {
-        localStorage.removeItem('noLyr_' + currentSongId);
-        getLyrics(queue[curIdx]);
+        localStorage.removeItem('noLyr_' + uid);
+// ... rest of function ...
     } else {
-        localStorage.setItem('noLyr_' + currentSongId, "true");
+        localStorage.setItem('noLyr_' + uid, "true");
+// ...
         lyrics = [];
         lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter:blur(0)">Lyrics permanently disabled for this track.</p>';
     }
@@ -120,20 +129,28 @@ function stopSync() {
 }
 
 function manualSyncInput(val) {
+    const s = queue[curIdx];
+    if (!s) return;
+    const uid = getLyricTrackId(s);
+    
     let numericVal = parseFloat(val.replace(/[^\d.-]/g, ''));
     if (isNaN(numericVal)) {
         document.getElementById('sync-val').value = (songSyncOffset > 0 ? '+' : '') + songSyncOffset.toFixed(1) + 's';
         return;
     }
     songSyncOffset = numericVal;
-    localStorage.setItem('sync_' + currentSongId, songSyncOffset.toFixed(1));
+    localStorage.setItem('sync_' + uid, songSyncOffset.toFixed(1));
     document.getElementById('sync-val').value = (songSyncOffset > 0 ? '+' : '') + songSyncOffset.toFixed(1) + 's';
-    showToast(`Sync offset saved: ${songSyncOffset.toFixed(1)}s`);
+    if (typeof showToast === 'function') showToast(`Sync offset saved: ${songSyncOffset.toFixed(1)}s`);
 }
 
 function adjSync(val) {
+    const s = queue[curIdx];
+    if (!s) return;
+    const uid = getLyricTrackId(s);
+    
     songSyncOffset += val;
-    localStorage.setItem('sync_' + currentSongId, songSyncOffset.toFixed(1));
+    localStorage.setItem('sync_' + uid, songSyncOffset.toFixed(1));
     const input = document.getElementById('sync-val');
     if (input) {
         input.value = (songSyncOffset > 0 ? '+' : '') + songSyncOffset.toFixed(1) + 's';
@@ -161,7 +178,7 @@ async function getLyrics(s) {
     }
 
     try {
-        const cSongId = s.id || s.p;
+        const cSongId = getLyricTrackId(s);
 
         lyrics = [];
         lyrIdx = -1;
@@ -374,10 +391,10 @@ function toggleEditMode() {
             const lPath = path.join(lDir, s.a + ' - ' + getCleanTitle(s) + '.lrc');
             fs.writeFileSync(lPath, newLrc);
         } else {
-            localStorage.setItem('lyric_custom_' + currentSongId, newLrc);
+            localStorage.setItem('lyric_custom_' + getLyricTrackId(s), newLrc);
         }
 
-        localStorage.removeItem('noLyr_' + currentSongId);
+        localStorage.removeItem('noLyr_' + getLyricTrackId(s));
         updateToolIcons();
 
         btn.innerText = 'edit';
@@ -482,11 +499,11 @@ function selectRetryLyrics() {
         if (!fs.existsSync(lDir)) fs.mkdirSync(lDir);
         fs.writeFileSync(lPath, finalLyrics);
     } else {
-        localStorage.setItem('lyric_custom_' + (s.id || s.p), finalLyrics);
+        localStorage.setItem('lyric_custom_' + getLyricTrackId(s), finalLyrics);
     }
 
     show(finalLyrics);
-    localStorage.removeItem('apiEmpty_' + (s.id || s.p));
+    localStorage.removeItem('apiEmpty_' + getLyricTrackId(s));
     closeRetryPreview();
     exitRetryUI();
 }
@@ -747,12 +764,19 @@ window.addEventListener('load', () => {
 // ==========================================
 // --- UPDATE TOOL ICONS (SYNC + BLOCK) ---
 // ==========================================
+// ==========================================
+// --- UPDATE TOOL ICONS (SYNC + BLOCK) ---
+// ==========================================
 function updateToolIcons() {
-    const isBlocked = localStorage.getItem('noLyr_' + currentSongId);
+    const s = typeof queue !== 'undefined' ? queue[curIdx] : null;
+    if (!s) return;
+    const uid = getLyricTrackId(s);
+    
+    const isBlocked = localStorage.getItem('noLyr_' + uid);
     document.getElementById('btn-nolyrics').classList.toggle('active', !!isBlocked);
     document.getElementById('btn-nolyrics').style.color = isBlocked ? '#ff4c4c' : '';
 
-    songSyncOffset = parseFloat(localStorage.getItem('sync_' + currentSongId)) || 0;
+    songSyncOffset = parseFloat(localStorage.getItem('sync_' + uid)) || 0;
     document.getElementById('sync-val').value = (songSyncOffset > 0 ? '+' : '') + songSyncOffset.toFixed(1) + 's';
 }
 

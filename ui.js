@@ -285,15 +285,24 @@ document.addEventListener('contextmenu', (e) => {
     if (card || searchItem) {
         e.preventDefault();
         const el = card || searchItem;
-        window.ctxTargetSong = {
-            t: el.getAttribute('data-title'),
-            a: el.getAttribute('data-artist'),
-            cover: el.getAttribute('data-cover'),
-            p: el.getAttribute('data-url'),
-            ytId: el.getAttribute('data-ytid') || '',
-            isOnline: true,
-            needsAudioStream: !el.getAttribute('data-url')
-        };
+        
+        // 🔥 THE FIX: Check if the element has a bundled 'data-song' JSON object first!
+        const encodedData = el.getAttribute('data-song');
+        if (encodedData) {
+            window.ctxTargetSong = JSON.parse(decodeURIComponent(encodedData));
+        } else {
+            // Fallback for homepage cards that use individual data attributes
+            window.ctxTargetSong = {
+                t: el.getAttribute('data-title') || 'Unknown Track',
+                a: el.getAttribute('data-artist') || 'Unknown Artist',
+                cover: el.getAttribute('data-cover') || '',
+                p: el.getAttribute('data-url') || '',
+                ytId: el.getAttribute('data-ytid') || '',
+                isOnline: true,
+                needsAudioStream: !el.getAttribute('data-url')
+            };
+        }
+        
         menuHtml = `
             <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
             <div class="context-item" onclick="addToQueueDirect(window.ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
@@ -312,8 +321,11 @@ document.addEventListener('contextmenu', (e) => {
         const song = queue[qIdx];
         if (!song) return;
         window.ctxTargetSong = song;
+        
+        // 🔥 THE FIX: Removed 'Play Now', Added 'Play Next' and 'Add to Bottom' for queue items!
         menuHtml = `
-            <div class="context-item" onclick="play(${qIdx}); document.getElementById('custom-context-menu').style.display='none';"><span class="material-icons-round">play_arrow</span> Play Now</div>
+            <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
+            <div class="context-item" onclick="addToQueueDirect(window.ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
             <div class="context-item" onclick="removeFromQueue(${qIdx})"><span class="material-icons-round">remove_circle_outline</span> Remove from Queue</div>
             <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
             <div class="context-item" onclick="shareTrackDirect(window.ctxTargetSong)"><span class="material-icons-round">share</span> Share Link</div>
@@ -340,11 +352,13 @@ document.addEventListener('contextmenu', (e) => {
     menu.style.left = `${e.pageX}px`;
     menu.style.top = `${yPos}px`;
     menu.style.display = 'block';
+    document.body.classList.add('lock-hover-queue');
 });
 
 document.addEventListener('click', (e) => {
     const menu = document.getElementById('custom-context-menu');
     if (menu && !e.target.closest('#custom-context-menu')) menu.style.display = 'none';
+    document.body.classList.remove('lock-hover-queue');
 });
 
 document.addEventListener('click', (e) => {
@@ -361,16 +375,23 @@ document.addEventListener('click', (e) => {
 function animateWhoosh(song, startX, startY, type) {
     const ghost = document.createElement('div');
     ghost.className = 'flying-card';
-    const safeT = song.t.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    
+    // 🔥 THE FIX: Safely fallback to 'Unknown Track' if the search result didn't provide a title
+    const titleText = song.t || 'Unknown Track';
+    const safeT = titleText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    
     const coverHtml = song.cover
         ? `<img src="${song.cover}" style="width:36px; height:36px; border-radius:4px; object-fit:cover;">`
         : `<div style="width:36px; height:36px; background:#333; border-radius:4px; display:flex; align-items:center; justify-content:center;"><span class="material-icons-round" style="font-size:20px;">music_note</span></div>`;
+    
     ghost.innerHTML = `${coverHtml}<div style="font-size:0.9rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">${safeT}</div>`;
     document.body.appendChild(ghost);
+    
     ghost.style.left = startX + 'px';
     ghost.style.top = startY + 'px';
     ghost.style.transform = 'scale(1)';
     void ghost.offsetWidth;
+    
     const sidebar = document.querySelector('.yt-sidebar');
     let targetX = 130, targetY = window.innerHeight / 2;
     if (sidebar) {
@@ -378,6 +399,7 @@ function animateWhoosh(song, startX, startY, type) {
         targetX = rect.left + (rect.width / 2) - 50;
         targetY = type === 'next' ? rect.top + 150 : rect.bottom - 100;
     }
+    
     ghost.style.transform = `translate(${targetX - startX}px, ${targetY - startY}px) scale(0.15) rotate(-15deg)`;
     ghost.style.opacity = '0';
     setTimeout(() => ghost.remove(), 600);

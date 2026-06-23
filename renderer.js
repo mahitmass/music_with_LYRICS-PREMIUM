@@ -618,6 +618,8 @@ function togglePlay() {
     const s = typeof queue !== 'undefined' ? queue[curIdx] : null;
     if (!s) return;
 
+    if (!window.hasPlayedOnce) { window.hasPlayedOnce = true; if (typeof switchToPlayerView === 'function') switchToPlayerView(); }
+
     // Detect if we just booted up and the saved YouTube URL has yesterday's dead port
     const isStaleYT = s.isOnline && s.ytId && s.p && typeof ytStreamPort !== 'undefined' && ytStreamPort && !s.p.includes(`:${ytStreamPort}/`);
     
@@ -776,7 +778,7 @@ function filterQueue(query, targetId, isImmersive = false) {
     let html = `<div style="padding:10px 10px 5px; color:var(--accent); font-size:0.75rem; font-weight:bold; letter-spacing:1px; text-transform:uppercase;">Local Queue</div>`;
     let localFound = false;
     queue.forEach((s, i) => {
-        if (s.t.toLowerCase().includes(q) || s.a.toLowerCase().includes(q)) {
+    if ((s.t || '').toLowerCase().includes(q) || (s.a || '').toLowerCase().includes(q)) {
             localFound = true;
             let icon = s.isOnline ? "cloud" : "audiotrack";
             let encodedSong = encodeURIComponent(JSON.stringify(s));
@@ -789,7 +791,7 @@ function filterQueue(query, targetId, isImmersive = false) {
     if (!localFound) html += `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No local match</div>`;
 
     let history = JSON.parse(localStorage.getItem('playHistory') || '[]');
-    let historyMatches = history.filter(s => s.t.toLowerCase().includes(q) || (s.a && s.a.toLowerCase().includes(q)));
+    let historyMatches = history.filter(s => (s.t || '').toLowerCase().includes(q) || (s.a || '').toLowerCase().includes(q));
     if (historyMatches.length > 0) {
         html += `<div style="padding:15px 10px 5px; color:#b57bff; font-size:0.75rem; font-weight:bold; letter-spacing:1px; text-transform:uppercase; border-top:1px solid #333; margin-top:5px;">From Your History</div>`;
         historyMatches.slice(0, 4).forEach((s) => {
@@ -872,7 +874,7 @@ async function fetchOnlineSearch(query, containerId) {
 
                     totalResultsCount++;
                     html += `
-                    <div class="item" data-type="search-result" onclick="if(typeof act === 'function') act('${encodedSong}'); else playSearchItem('${encodedSong}', '${containerId}')" style="cursor:pointer; border-left: 3px solid #ff4c4c; align-items: center; padding: 8px 10px;">
+                    <div class="item" data-type="search-result" data-song="${encodedSong}" onclick="if(typeof act === 'function') act('${encodedSong}'); else playSearchItem('${encodedSong}', '${containerId}')" style="cursor:pointer; border-left: 3px solid #ff4c4c; align-items: center; padding: 8px 10px;">
                         <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
                         <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
                             <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
@@ -1244,5 +1246,86 @@ window.scrollToCurrentSong = function () {
     } catch (e) { console.warn("Scroll bypassed safely."); }
 };
 
+// ==========================================
+// --- SMART ONLINE BUFFER PERCENTAGE ---
+// ==========================================
+window.addEventListener('load', () => {
+    const audioEl = document.getElementById('player');
+    const pctEl = document.getElementById('buffer-pct');
+    if (!audioEl || !pctEl) return;
+
+    let currentBufferDisplay = 0;
+    let targetBufferActual = 0;
+    let bufferAnimFrame = null;
+    let isFullyLoaded = false;
+
+    // Triggered the exact millisecond you click play
+    audioEl.addEventListener('loadstart', () => {
+        const s = typeof queue !== 'undefined' ? queue[curIdx] : null;
+        if (s && s.isOnline) {
+            pctEl.style.display = 'inline-block';
+            pctEl.innerText = '0%';
+            currentBufferDisplay = 0;
+            
+            // 🔥 THE FAKE OUT: Instantly target 30% so the UI feels ultra-responsive
+            targetBufferActual = 30; 
+            isFullyLoaded = false;
+            
+            cancelAnimationFrame(bufferAnimFrame);
+            animateBufferText();
+        } else {
+            pctEl.style.display = 'none'; // Hide instantly for local MP3s
+        }
+    });
+
+    // Triggers periodically as the browser grabs chunks of the song
+    audioEl.addEventListener('progress', () => {
+        if (isFullyLoaded) return;
+        
+        // Every time we get a chunk of data, bump the target up a bit (maxing around 85%)
+        if (targetBufferActual < 85) {
+            targetBufferActual += 15;
+        }
+    });
+
+    // 🔥 THE FINISH LINE: The exact millisecond the song actually outputs sound!
+    audioEl.addEventListener('playing', () => {
+        if (isFullyLoaded) return;
+        isFullyLoaded = true;
+        targetBufferActual = 100; // Force it to finish the animation
+    });
+
+    // The magical smooth counting animation
+    function animateBufferText() {
+        if (pctEl.style.display === 'none') return;
+
+        // Smoothly interpolate the display number towards the target
+        if (currentBufferDisplay < targetBufferActual) {
+            // If the song is playing, count up ultra-fast. If just buffering, count normally.
+            let speed = isFullyLoaded ? 0.4 : 0.05; 
+            currentBufferDisplay += (targetBufferActual - currentBufferDisplay) * speed;
+            
+            if (targetBufferActual - currentBufferDisplay < 0.5) {
+                currentBufferDisplay = targetBufferActual;
+            }
+        }
+
+        let displayVal = Math.floor(currentBufferDisplay);
+        if (displayVal > 100) displayVal = 100;
+
+        pctEl.innerText = displayVal + '%';
+
+        // Once it hits 100%, wait half a second and hide it
+        if (displayVal >= 100) {
+            setTimeout(() => {
+                if (pctEl.innerText === '100%') pctEl.style.display = 'none';
+            }, 500);
+            return;
+        }
+
+        // Loop the animation
+        bufferAnimFrame = requestAnimationFrame(animateBufferText);
+    }
+});
 
 //yo

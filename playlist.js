@@ -340,156 +340,7 @@ window.openLocalPlaylist = function () {
     }
 };
 
-// ==========================================
-// --- HOMEPAGE CAROUSEL ENGINE ---
-// ==========================================
-const delay = ms => new Promise(res => setTimeout(res, ms));
 
-async function loadHomepage() {
-    const container = document.getElementById('dynamic-homepage');
-    if (!container) return;
-    container.innerHTML = `<div style="padding: 20px; color: var(--dim);"><span class="material-icons-round" style="animation: spin 1s linear infinite; vertical-align: middle;">sync</span> AI is scanning your history...</div>`;
-
-    const currentBucket = getTimeBucket();
-    const bucketLabel = currentBucket === 'Late Night' ? 'Late Night' : currentBucket;
-    const queueArtists = [...new Set(queue.map(song => sanitizeArtistName(song.a)).filter(Boolean))];
-    const artistEntries = Object.entries(aiUserModel.artists)
-        .filter(([artist]) => isKnownArtist(artist))
-        .map(([artist, stats]) => {
-            const timeBonus = stats.time_of_day?.[currentBucket] || 0;
-            return {
-                artist,
-                score: (stats.play_count * 1.5) - (stats.skip_rate * 2) + timeBonus,
-                affinity: stats.artist_affinity || 0,
-                skip_rate: stats.skip_rate || 0
-            };
-        })
-        .sort((a, b) => (b.score - a.score) || (b.affinity - a.affinity));
-
-    const topArtist = artistEntries[0]?.artist || queueArtists[0] || '';
-    const bucketArtist = [...artistEntries]
-        .sort((a, b) => ((b.affinity + ((aiUserModel.artists[b.artist]?.time_of_day?.[currentBucket] || 0) * 1000)) - (a.affinity + ((aiUserModel.artists[a.artist]?.time_of_day?.[currentBucket] || 0) * 1000))))
-        .find(entry => (aiUserModel.artists[entry.artist]?.time_of_day?.[currentBucket] || 0) > 0)?.artist;
-    const skippedArtist = [...artistEntries].sort((a, b) => b.skip_rate - a.skip_rate)[0]?.artist;
-    const recoveryArtist = artistEntries.find(entry => entry.artist !== skippedArtist)?.artist || queueArtists.find(artist => artist !== skippedArtist);
-
-    let shelves = [];
-    if (bucketArtist) shelves.push({ q: bucketArtist, title: `Your ${bucketLabel} Vibes`, type: 'songs' });
-    if (topArtist) shelves.push({ q: topArtist, title: `Heavy Rotation: ${topArtist}`, type: 'songs' });
-    if (topArtist) shelves.push({ q: topArtist, title: `${topArtist} Mixes & Playlists`, type: 'playlists' });
-    if (skippedArtist && recoveryArtist) {
-        shelves.push({ q: recoveryArtist, title: `Because you skipped ${skippedArtist}, try ${recoveryArtist}`, type: 'songs' });
-    }
-    if (topArtist && Math.random() < 0.10) {
-        shelves.push({ q: `${topArtist} similar artists`, title: `Discovery Entropy: Beyond ${topArtist}`, type: 'songs' });
-    }
-    if (shelves.length === 0) {
-        const fallbackArtists = queueArtists.slice(0, 3);
-        fallbackArtists.forEach((artist, index) => {
-            shelves.push({
-                q: artist,
-                title: index === 0 ? `Heavy Rotation: ${artist}` : `More from ${artist}`,
-                type: index === 2 ? 'playlists' : 'songs'
-            });
-        });
-    }
-    if (shelves.length === 0) {
-        shelves = [
-            { q: "Global Top 50", title: "Global Playlists", type: "playlists" },
-            { q: "Viral Hits", title: "Internet Viral Songs", type: "songs" }
-        ];
-    }
-
-    let html = '';
-    shelves.forEach((item, i) => {
-        html += `
-        <div style="margin-top: 35px;">
-            <h2 style="margin-bottom: 15px; font-size: 1.4rem;">${item.title}</h2>
-            <div id="carousel-${i}" class="horizontal-carousel"></div>
-        </div>`;
-    });
-    container.innerHTML = html;
-
-    for (let i = 0; i < shelves.length; i++) {
-        await delay(600);
-        if (shelves[i].type === 'playlists') populatePlaylistCarousel(shelves[i].q, `carousel-${i}`);
-        else populateCarousel(shelves[i].q, `carousel-${i}`);
-    }
-}
-
-async function populateCarousel(query, containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    try {
-        let res = await fetchWithFallback(`/search/songs?query=${encodeURIComponent(query)}&limit=15`);
-        let json = await res.json();
-        let results = (json.data && json.data.results) ? json.data.results : [];
-        results = results.filter(song => isKnownArtist(getSongArtist(song)));
-
-        if (results.length > 0) {
-            let html = "";
-            results.forEach(song => {
-                let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-                let artist = song.artists?.primary?.[0]?.name.replace(/&quot;/g, '"').replace(/&amp;/g, '&') || "Unknown";
-                let cover = song.image?.length > 0 ? song.image[song.image.length - 1].url : "";
-                let dl = song.downloadUrl?.length > 0 ? song.downloadUrl[song.downloadUrl.length - 1].url : "";
-                if (dl) {
-                    let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                    let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                    let safeC = cover ? cover.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
-                    let safeDL = dl.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                    html += `
-<div class="song-card" data-type="song"
-     data-title="${safeT}" data-artist="${safeA}" data-cover="${safeC}" data-url="${safeDL}" data-ytid="${song.videoId || ''}"
-     onclick="playDirectlyFromHome('${safeT}', '${safeA}', '${safeC}', '${safeDL}')"
-     oncontextmenu="openSearchMenu(event, '${encodeURIComponent(JSON.stringify(song))}')">
-    <img src="${cover}">
-    <div class="title">${title}</div>
-    <div class="artist">${artist}</div>
-</div>`;
-                }
-            });
-            container.innerHTML = html;
-        } else { container.innerHTML = `<div style="color: var(--dim);">No results found.</div>`; }
-    } catch (e) { container.innerHTML = `<div style="color: var(--dim);">Failed to load row.</div>`; }
-}
-
-async function populatePlaylistCarousel(query, containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    try {
-        let res = await fetchWithFallback(`/search/playlists?query=${encodeURIComponent(query)}&limit=10`);
-        let json = await res.json();
-        let results = (json.data && json.data.results) ? json.data.results : [];
-        if (results.length > 0) {
-            let html = "";
-            results.forEach(pl => {
-                let title = (pl.title || pl.name || "Unknown").replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                let cover = pl.image?.length > 0 ? pl.image[pl.image.length - 1].url : "";
-                html += `
-<div class="song-card" data-type="playlist" data-id="${pl.id}" data-title="${title}" style="border-radius: 20px; background: rgba(0,0,0,0.4);" onclick="loadSaavnPlaylist('${pl.id}', '${title}')">
-    <img src="${cover}" style="border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.6);">
-    <div class="title" style="text-align: center;">${title}</div>
-    <div class="artist" style="text-align: center;">${pl.songCount || 'Mix'} Tracks</div>
-</div>`;
-            });
-            container.innerHTML = html;
-        }
-    } catch (e) { container.innerHTML = `<div style="color: var(--dim);">Failed to load playlists.</div>`; }
-}
-
-function playDirectlyFromHome(title, artist, cover, url) {
-    const newSong = { t: title, a: artist, p: normalizeSaavnUrl(url), isOnline: true, cover: cover };
-    const insertPos = queue.length === 0 ? 0 : curIdx + 1;
-    queue.splice(insertPos, 0, newSong);
-    saveState();
-    switchToPlayerView();
-    play(insertPos);
-    const sideSearch = document.getElementById('sidebar-search-results');
-    const immSearch = document.getElementById('imm-search-results');
-    if (sideSearch) sideSearch.style.display = 'none';
-    if (immSearch) immSearch.style.display = 'none';
-}
 
 // ==========================================
 // --- SMART YOUTUBE TITLE CLEANER ---
@@ -592,12 +443,21 @@ function renderHistoryView() {
     }
     let html = '';
     history.forEach((s, i) => {
-        let coverHtml = s.cover
-            ? `<img src="${s.cover}" style="width: 45px !important; height: 45px !important; min-width: 45px !important; border-radius: 6px; object-fit: cover; flex-shrink: 0 !important; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">`
-            : `<div style="width: 45px !important; height: 45px !important; min-width: 45px !important; border-radius: 6px; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; flex-shrink: 0 !important;"><span class="material-icons-round" style="color:var(--dim);">audiotrack</span></div>`;
+        // Unique ID for each image container so we can inject the art asynchronously
+        let imgId = `hist-cover-${i}`;
+        
+        let coverHtml = '';
+        if (s.isOnline && s.cover) {
+            coverHtml = `<img src="${s.cover}" style="width: 45px !important; height: 45px !important; min-width: 45px !important; border-radius: 6px; object-fit: cover; flex-shrink: 0 !important; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">`;
+        } else {
+            // Placeholder template container that we will swap out via jsmediatags
+            coverHtml = `<div id="${imgId}" style="width: 45px !important; height: 45px !important; min-width: 45px !important; border-radius: 6px; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; flex-shrink: 0 !important;"><span class="material-icons-round" style="color:var(--dim);">music_note</span></div>`;
+        }
+
         let safeTitle = s.t ? s.t.replace(/'/g, "\\'").replace(/"/g, '&quot;') : 'Unknown';
         let safeArtist = s.a ? s.a.replace(/'/g, "\\'").replace(/"/g, '&quot;') : 'Unknown Artist';
         let encodedSong = encodeURIComponent(JSON.stringify(s));
+        
         html += `
         <div class="track-row" data-type="history-item" data-song="${encodedSong}" onclick="playFromHistory(${i})" style="display: flex !important; flex-direction: row !important; align-items: center !important; padding: 10px 15px !important; border-radius: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05);">
             <div style="width: 30px !important; min-width: 30px !important; text-align: left !important; color: var(--dim) !important; font-size: 0.9rem !important; flex-shrink: 0 !important; margin: 0 !important; padding: 0 !important;">${i + 1}</div>
@@ -610,8 +470,42 @@ function renderHistoryView() {
                 <span class="material-icons-round" style="color:var(--dim) !important; font-size:20px !important; margin: 0 !important; padding: 0 !important;" title="${s.isOnline ? 'Online Stream' : 'Local File'}">${s.isOnline ? 'cloud' : 'folder'}</span>
             </div>
         </div>`;
+        
+        // Asynchronously fetch local art so the screen renders instantly without freezing!
+        if (!s.isOnline && s.p) {
+            setTimeout(() => extractHistoryLocalArt(s.p, imgId), 10);
+        }
     });
     container.innerHTML = html;
+}
+
+function extractHistoryLocalArt(filePath, targetElementId) {
+    const targetEl = document.getElementById(targetElementId);
+    if (!targetEl) return;
+
+    fetch(encodeURI(`file://${filePath.replace(/\\/g, '/')}`).replace(/#/g, '%23').replace(/\?/g, '%3F'))
+        .then(res => res.blob())
+        .then(blob => {
+            window.jsmediatags.read(blob, {
+                onSuccess: function (tag) {
+                    const picture = tag.tags.picture;
+                    if (picture) {
+                        let b64 = "";
+                        const bytes = new Uint8Array(picture.data);
+                        for (let i = 0; i < bytes.byteLength; i++) {
+                            b64 += String.fromCharCode(bytes[i]);
+                        }
+                        const base64Url = "data:" + picture.format + ";base64," + window.btoa(b64);
+                        
+                        // Replace the folder placeholder with a beautiful image tag live!
+                        if (targetEl) {
+                            targetEl.outerHTML = `<img src="${base64Url}" style="width: 45px !important; height: 45px !important; min-width: 45px !important; border-radius: 6px; object-fit: cover; flex-shrink: 0 !important; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">`;
+                        }
+                    }
+                },
+                onError: function() { console.log("No embedded metadata art found for: " + filePath); }
+            });
+        }).catch(() => {});
 }
 
 function clearHistory() {

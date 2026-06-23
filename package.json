@@ -1,6 +1,6 @@
 {
   "name": "music-player-mass",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "A premium local MP3 player with synced lyrics.",
   "author": "Your Name",
   "main": "main.js",
@@ -14,6 +14,12 @@
     "files": [
       "**/*",
       "!node_modules/.cache/**"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/youtube-dl-exec/**/*",
+      "node_modules/ffmpeg-static/**/*",
+      "node_modules/whisper-node/**/*"
     ],
     "directories": {
       "buildResources": "."

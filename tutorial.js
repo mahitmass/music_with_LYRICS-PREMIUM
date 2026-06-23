@@ -499,3 +499,341 @@ function exitMassMediaTutorial() {
 }
 
 setTimeout(initMassMediaTutorial, 2000);
+
+// ============================================================================
+// --- PRO EXTENSION: INTERACTIVE SHORTCUTS & FEATURE TOUR ENGINE ---
+// ============================================================================
+
+// Global template function to open/render the updated Keyboard Shortcuts window
+window.openEnhancedShortcutsWindow = function() {
+    // Look for or create the shortcuts modal container
+    let modal = document.getElementById('shortcuts-modal-master');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'shortcuts-modal-master';
+        document.body.appendChild(modal);
+    }
+
+    // Inject styles for the scroll containers, divider line, pulsating arrow, and question mark buttons
+    if (!document.getElementById('enhanced-shortcuts-styles')) {
+        const style = document.createElement('style');
+        style.id = 'enhanced-shortcuts-styles';
+        style.innerHTML = `
+            #shortcuts-modal-master {
+                position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                background: rgba(3, 3, 3, 0.85); backdrop-filter: blur(15px);
+                z-index: 999999; display: flex; justify-content: center; align-items: center;
+            }
+            .shortcuts-card {
+                background: #141414; width: 500px; max-height: 85vh; border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 16px; display: flex; flex-direction: column; color: white;
+                box-shadow: 0 30px 60px rgba(0,0,0,0.8); font-family: 'Segoe UI', sans-serif; overflow: hidden;
+            }
+            .shortcuts-header {
+                padding: 20px 25px; border-bottom: 1px solid rgba(255,255,255,0.05);
+                display: flex; justify-content: space-between; align-items: center;
+            }
+            .shortcuts-scroll-area {
+                flex: 1; overflow-y: auto; padding: 10px 25px 25px 25px; scroll-behavior: smooth;
+            }
+            .shortcuts-scroll-area::-webkit-scrollbar { width: 6px; }
+            .shortcuts-scroll-area::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+            
+            /* Lower and upper part layout rows */
+            .shortcut-row {
+                display: flex; justify-content: space-between; align-items: center; padding: 12px 0;
+                border-bottom: 1px solid rgba(255,255,255,0.03);
+            }
+            .shortcut-key {
+                background: rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 6px;
+                font-family: monospace; font-weight: bold; color: #4cc2ff; border: 1px solid rgba(76,194,255,0.2);
+            }
+            
+            /* Separator Line and Downward Arrow */
+            .shortcuts-divider-line {
+                position: relative; margin: 30px 0 25px; border-top: 1px dashed rgba(76,194,255,0.4);
+                display: flex; justify-content: center;
+            }
+            .shortcuts-scroll-arrow {
+                position: absolute; top: -14px; background: #141414; color: #4cc2ff;
+                padding: 0 10px; font-size: 20px !important; cursor: pointer;
+                animation: scrollArrowPulse 1.8s infinite ease-in-out;
+            }
+            @keyframes scrollArrowPulse {
+                0%, 100% { transform: translateY(0); opacity: 0.5; }
+                50% { transform: translateY(6px); opacity: 1; }
+            }
+            
+            /* Question Mark Buttons */
+            .feature-help-btn {
+                background: rgba(76,194,255,0.1); color: #4cc2ff; border: 1px solid rgba(76,194,255,0.3);
+                width: 24px; height: 24px; border-radius: 50%; display: inline-flex;
+                align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 900;
+                cursor: pointer; margin-left: 10px; transition: all 0.2s ease; vertical-align: middle;
+            }
+            .feature-help-btn:hover {
+                background: #4cc2ff; color: #000; transform: scale(1.1);
+                box-shadow: 0 0 10px rgba(76,194,255,0.4);
+            }
+            .feature-context-title { font-weight: bold; font-size: 1rem; color: #fff; display: flex; align-items: center; }
+            .feature-context-desc { color: #aaa; font-size: 0.85rem; margin-top: 3px; line-height: 1.4; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Modal Content Layout Architecture
+    modal.innerHTML = `
+        <div class="shortcuts-card">
+            <div class="shortcuts-header">
+                <h2 style="margin:0; font-size:1.25rem; font-weight:800; display:flex; align-items:center; gap:10px;">
+                    <span class="material-icons-round" style="color:#4cc2ff;">keyboard</span> Hotkeys & Pro Features
+                </h2>
+                <span class="material-icons-round" style="cursor:pointer; color:#aaa;" onclick="document.getElementById('shortcuts-modal-master').remove()">close</span>
+            </div>
+            
+            <div class="shortcuts-scroll-area" id="shortcuts-scrollbar-view">
+                <div class="shortcut-row"><span>Play / Pause</span><span class="shortcut-key">Spacebar</span></div>
+                <div class="shortcut-row"><span>Toggle Immersive / Home View</span><span class="shortcut-key">M</span></div>
+                <div class="shortcut-row"><span>Open Alternative Lyrics</span><span class="shortcut-key">R</span></div>
+                <div class="shortcut-row"><span>Toggle Lyrics Engine Power</span><span class="shortcut-key">T</span></div>
+                <div class="shortcut-row"><span>Block / Hide Bad Lyrics</span><span class="shortcut-key">X</span></div>
+                <div class="shortcut-row"><span>Magic Shuffle Remaining Queue</span><span class="shortcut-key">Z</span></div>
+                <div class="shortcut-row"><span>Focus Global Search Bar</span><span class="shortcut-key">S</span></div>
+                <div class="shortcut-row"><span>Close Menus / Clear Search Text</span><span class="shortcut-key">Escape</span></div>
+                <div class="shortcut-row"><span>Volume Up / Down</span><span class="shortcut-key">↑ / ↓ Arrows</span></div>
+                <div class="shortcut-row"><span>Skip / Rewind 10 Seconds</span><span class="shortcut-key">← / → Arrows</span></div>
+                
+                <div class="shortcuts-divider-line" onclick="document.getElementById('shortcuts-scrollbar-view').scrollTo({top: 500, behavior: 'smooth'});">
+                    <span class="material-icons-round shortcuts-scroll-arrow">keyboard_double_arrow_down</span>
+                </div>
+                
+                <div style="padding-top: 5px;">
+                    <div style="margin-bottom: 20px;">
+                        <div class="feature-context-title">
+                            Immersive Layout Cycling
+                            <button class="feature-help-btn" onclick="window.interactiveFeatureTour('album-cover')" title="Take interactive tour">?</button>
+                        </div>
+                        <div class="feature-context-desc">Clicking the album cover inside the Immersive Lyrics view dynamically swaps themes between Classic UI, Cyberpunk Studio, and Zen Artistic Canvas.</div>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <div class="feature-context-title">
+                            Lyrics Fine-Sync Panel
+                            <button class="feature-help-btn" onclick="window.interactiveFeatureTour('lyrics-controls')" title="Take interactive tour">?</button>
+                        </div>
+                        <div class="feature-context-desc">Access advanced synchronization controls directly below your playing tracks to adjust offset timestamps, or utilize the native AI edit pipeline.</div>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <div class="feature-context-title">
+                            Instant Playlist Import
+                            <button class="feature-help-btn" onclick="window.interactiveFeatureTour('playlist-import')" title="Take interactive tour">?</button>
+                        </div>
+                        <div class="feature-context-desc">Import any public or private playlist directly from YouTube Music by pasting its code link directly into your sidebar library console.</div>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <div class="feature-context-title">
+                            Media Management Toolbar
+                            <button class="feature-help-btn" onclick="window.interactiveFeatureTour('normal-toolbar')" title="Take interactive tour">?</button>
+                        </div>
+                        <div class="feature-context-desc">Use the dedicated toolbar located in normal mode to clear items, inject song folders recursively, or scrub structural queues safely.</div>
+                    </div>
+                    
+                    <div style="margin-bottom: 5px;">
+                        <div class="feature-context-title">
+                            Dynamic Listening History
+                            <button class="feature-help-btn" onclick="window.interactiveFeatureTour('history-tab')" title="Take interactive tour">?</button>
+                        </div>
+                        <div class="feature-context-desc">Monitors play count parameters, skipping variables, and velocity timestamps to dynamically feed the local self-learning AI recommendation profile.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+// Master Spotlight/Tour Routing Engine
+window.interactiveFeatureTour = function(featureKey) {
+    // Hide the shortcuts window modal temporarily
+    const shortcutsModal = document.getElementById('shortcuts-modal-master');
+    if (shortcutsModal) shortcutsModal.style.display = 'none';
+
+    // Remove any previous tour overlay masks to clear memory leaks
+    const existingTour = document.getElementById('interactive-tour-overlay');
+    if (existingTour) existingTour.remove();
+
+    // Spawn clean contextual spotlight mask structure
+    const tourOverlay = document.createElement('div');
+    tourOverlay.id = 'interactive-tour-overlay';
+    tourOverlay.style.cssText = `position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:9999999; pointer-events:none;`;
+    
+    tourOverlay.innerHTML = `
+        <svg width="100%" height="100%" style="position:absolute; top:0; left:0;">
+            <mask id="tour-mask-id">
+                <rect width="100%" height="100%" fill="white"/>
+                <rect id="tour-hole-id" x="0" y="0" width="0" height="0" rx="12" fill="black" />
+            </mask>
+            <rect width="100%" height="100%" fill="rgba(0,0,0,0.75)" mask="url(#tour-mask-id)"/>
+        </svg>
+        <div id="tour-bubble-tip" style="position:absolute; width:340px; background:#1c1b1b; border:1px solid #4cc2ff; border-radius:12px; padding:20px; color:white; font-family:sans-serif; box-shadow:0 20px 40px rgba(0,0,0,0.9); z-index:10000000; pointer-events:auto; transition: all 0.3s ease;">
+            <div style="font-weight:bold; color:#4cc2ff; margin-bottom:8px; display:flex; align-items:center; gap:8px;" id="tour-bubble-title"></div>
+            <div style="font-size:0.9rem; color:#ccc; line-height:1.4; margin-bottom:15px;" id="tour-bubble-text"></div>
+            <div style="text-align:right;" id="tour-bubble-footer"></div>
+        </div>
+    `;
+    document.body.appendChild(tourOverlay);
+
+    const hole = document.getElementById('tour-hole-id');
+    const bubble = document.getElementById('tour-bubble-tip');
+    const bTitle = document.getElementById('tour-bubble-title');
+    const bText = document.getElementById('tour-bubble-text');
+    const bFooter = document.getElementById('tour-bubble-footer');
+
+    // Inside Helper function to dynamically calculate layout positioning coordinates
+    function spotlightElement(element, title, description, footerHtml) {
+        if (!element) {
+            // Abort gracefully if element isn't found/rendered
+            window.closeTourAndRestoreShortcuts();
+            return;
+        }
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        setTimeout(() => {
+            const rect = element.getBoundingClientRect();
+            hole.setAttribute('x', rect.left - 10);
+            hole.setAttribute('y', rect.top - 10);
+            hole.setAttribute('width', rect.width + 20);
+            hole.setAttribute('height', rect.height + 20);
+
+            bTitle.innerHTML = title;
+            bText.innerHTML = description;
+            bFooter.innerHTML = footerHtml;
+
+            // Calculate smart vertical window placement coordinates
+            if (rect.top > window.innerHeight / 2) {
+                bubble.style.top = `${rect.top - bubble.offsetHeight - 25}px`;
+            } else {
+                bubble.style.top = `${rect.bottom + 25}px`;
+            }
+            bubble.style.left = `${Math.max(20, Math.min(window.innerWidth - 360, rect.left + (rect.width/2) - 170))}px`;
+        }, 250);
+    }
+
+    // ---------------------------------------------------------
+    // FEATURE TOUR 1: ALBUM COVER MODE SWITCHER
+    // ---------------------------------------------------------
+    if (featureKey === 'album-cover') {
+        // Ensure app switches to Immersive View so the album cover is visible
+        if (typeof switchToPlayerView === 'function') switchToPlayerView();
+
+        setTimeout(() => {
+            const targetCover = document.getElementById('album-cover') || document.querySelector('.album-cover');
+            spotlightElement(
+                targetCover,
+                `<span class="material-icons-round">palette</span> Cycle Layout Modes`,
+                `This is your interactive audio canvas! <br><br><b>Click the album cover right now</b> to see the view cycle live through the themes.`,
+                `<button class="tut-btn-primary" id="tour-cover-close-btn" onclick="window.closeTourAndRestoreShortcuts()" style="background:#ff4c4c; box-shadow:none; color:white;">Exit Tour</button>`
+            );
+
+            if (targetCover) {
+                // Safe intercept click to close the loop smoothly once selected
+                targetCover.addEventListener('click', function onCoverClick() {
+                    targetCover.removeEventListener('click', onCoverClick);
+                    
+                    // Show layout changed visual confirmation message
+                    const hintBtn = document.getElementById('tour-cover-close-btn');
+                    if (hintBtn) {
+                        hintBtn.innerText = "Layout Swapped! Returning...";
+                        hintBtn.style.background = "#4caf50";
+                    }
+                    
+                    setTimeout(() => {
+                        if (typeof switchToHomeView === 'function') switchToHomeView();
+                        window.closeTourAndRestoreShortcuts();
+                    }, 1200);
+                });
+            }
+        }, 400);
+    }
+
+    // ---------------------------------------------------------
+    // FEATURE TOUR 2: LYRICS CONTROL BUTTONS
+    // ---------------------------------------------------------
+    else if (featureKey === 'lyrics-controls') {
+        if (typeof switchToPlayerView === 'function') switchToPlayerView();
+        
+        setTimeout(() => {
+            const targetTools = document.querySelector('.lyric-tools');
+            spotlightElement(
+                targetTools,
+                `<span class="material-icons-round">tune</span> Lyrics Management Toolbar`,
+                `These are your synchronization instruments. You can quickly sync delay shifts, load alternative lyrics database entries, edit text blocks, or permanently toggle visibility filters.`,
+                `<button class="tut-btn-primary" onclick="if(typeof switchToHomeView==='function')switchToHomeView(); window.closeTourAndRestoreShortcuts();">Got it, Return</button>`
+            );
+        }, 400);
+    }
+
+    // ---------------------------------------------------------
+    // FEATURE TOUR 3: PLAYLIST IMPORT CONSOLE
+    // ---------------------------------------------------------
+    else if (featureKey === 'playlist-import') {
+        if (typeof switchToHomeView === 'function') switchToHomeView();
+        
+        setTimeout(() => {
+            const targetInput = document.getElementById('new-pl-input') || document.querySelector('.playlist-section');
+            spotlightElement(
+                targetInput,
+                `<span class="material-icons-round">playlist_add</span> YouTube Playlist Sync`,
+                `This container handles automated online streaming synchronization. Drop your target YouTube playlist code parameters right here to populate custom sidebar menus instantly.`,
+                `<button class="tut-btn-primary" onclick="window.closeTourAndRestoreShortcuts();">Got it, Return</button>`
+            );
+        }, 200);
+    }
+
+    // ---------------------------------------------------------
+    // FEATURE TOUR 4: NORMAL MODE MANAGEMENT TOOLBAR
+    // ---------------------------------------------------------
+    else if (featureKey === 'normal-toolbar') {
+        if (typeof switchToHomeView === 'function') switchToHomeView();
+        
+        setTimeout(() => {
+            const targetToolbar = document.querySelector('.queue-tools') || document.querySelector('.local-queue-container');
+            spotlightElement(
+                targetToolbar,
+                `<span class="material-icons-round">construction</span> Local Media Controls`,
+                `Manage operations seamlessly inside your workspace. These modules let you recursively load structural directories, scrub current playback parameters, or dump cache arrays safely.`,
+                `<button class="tut-btn-primary" onclick="window.closeTourAndRestoreShortcuts();">Got it, Return</button>`
+            );
+        }, 200);
+    }
+
+    // ---------------------------------------------------------
+    // FEATURE TOUR 5: LISTENING HISTORY PROFILER
+    // ---------------------------------------------------------
+    else if (featureKey === 'history-tab') {
+        if (typeof switchToHomeView === 'function') switchToHomeView();
+        
+        setTimeout(() => {
+            const targetHistory = document.querySelector('button[onclick*="openHistoryView"]') || document.querySelector('.top-nav-bar');
+            spotlightElement(
+                targetHistory,
+                `<span class="material-icons-round">auto_awesome</span> Local AI Profiler Tab`,
+                `Tracks velocity curves across your playback files. This logs skip counters, repetition metrics, and hour indices to calculate real-time genre weights for your smart Explore page!`,
+                `<button class="tut-btn-primary" onclick="window.closeTourAndRestoreShortcuts();">Got it, Return</button>`
+            );
+        }, 200);
+    }
+};
+
+// Shared teardown function to destroy the tour overlay and bring back the Shortcuts Modal window safely
+window.closeTourAndRestoreShortcuts = function() {
+    const overlay = document.getElementById('interactive-tour-overlay');
+    if (overlay) overlay.remove();
+
+    const shortcutsModal = document.getElementById('shortcuts-modal-master');
+    if (shortcutsModal) {
+        shortcutsModal.style.display = 'flex';
+    }
+};
+

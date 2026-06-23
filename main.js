@@ -4,7 +4,14 @@ const fs = require('fs');
 const https = require('https');
 const { fork } = require('child_process');
 const http = require('http');
-const youtubeDl = require('youtube-dl-exec');
+const ytdlRaw = require('youtube-dl-exec');
+
+// 🔥 ASAR PATH FIX: Redirect Electron to the real unpacked binary folder on the hard drive
+let ytBinPath = ytdlRaw.constants.YOUTUBE_DL_PATH;
+if (ytBinPath && ytBinPath.includes('app.asar')) {
+    ytBinPath = ytBinPath.replace('app.asar', 'app.asar.unpacked');
+}
+const youtubeDl = ytdlRaw.create(ytBinPath);
 
 app.commandLine.appendSwitch('js-flags', '--optimize_for_size --max_old_space_size=256');
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -299,14 +306,25 @@ if (!gotTheLock) {
         const execAsync = util.promisify(cp.exec);
         
         let ffmpegPath = 'ffmpeg';
-        try { ffmpegPath = require('ffmpeg-static').replace(/\\\\/g, '/'); } catch(e) {}
+        try { 
+            let rawFfmpeg = require('ffmpeg-static'); 
+            if (rawFfmpeg.includes('app.asar')) {
+                rawFfmpeg = rawFfmpeg.replace('app.asar', 'app.asar.unpacked');
+            }
+            ffmpegPath = rawFfmpeg.replace(/\\/g, '/');
+        } catch(e) {}
         
-        const whisperFolder = path.join(__dirname, 'node_modules', 'whisper-node', 'lib', 'whisper.cpp');
+        let whisperFolder = path.join(__dirname, 'node_modules', 'whisper-node', 'lib', 'whisper.cpp');
+        if (whisperFolder.includes('app.asar')) {
+            whisperFolder = whisperFolder.replace('app.asar', 'app.asar.unpacked');
+        }
         let mainExe = path.join(whisperFolder, 'whisper-cli.exe');
         
         if (!fs.existsSync(mainExe)) {
             mainExe = path.join(whisperFolder, 'main.exe');
         }
+        
+        
 
         const modelPath = path.join(whisperFolder, 'models', 'ggml-tiny.en.bin');
 
