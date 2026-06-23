@@ -1,12 +1,11 @@
 name: Build Mac App
 
-# This allows you to trigger the build manually from the GitHub website
-on: 
-  workflow_dispatch: 
+on:
+  workflow_dispatch:
 
 jobs:
   build-mac:
-    runs-on: macos-latest # Tells GitHub to use an Apple Mac server
+    runs-on: macos-latest
 
     steps:
       - name: Check out the code
@@ -15,10 +14,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: 'npm'
 
       - name: Install Dependencies
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm install
 
       - name: Build Mac (.dmg) files
