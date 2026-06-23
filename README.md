@@ -39,7 +39,7 @@ Most modern players are either too heavy, hide synced lyrics behind a subscripti
 ### ｲ App Showcase
 | Normal Boot (Explore) | Immersive Mode (Classic) | Cyberpunk Studio | Zen Artistic Canvas | Playlist Sync |
 | :---: | :---: | :---: | :---: | :---: |
-| ![Home](assets/home.img) | ![Mode 1](assets/1.img) | ![Mode 2](assets/2.img) | ![Mode 3](assets/3.img) | ![Playlist](assets/play.img) |
+| ![Home](assets/home.png) | ![Mode 1](assets/1.png) | ![Mode 2](assets/2.png) | ![Mode 3](assets/3.png) | ![Playlist](assets/play.png) |
 
 ---
 
