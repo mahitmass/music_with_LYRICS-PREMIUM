@@ -1,4 +1,4 @@
-# <img src="assets/my-icon.png" alt="Icon" height="32" style="vertical-align: middle;"> Pro Media Player
+# <img src="assets/my-icon.png" alt="Icon" height="52" style="vertical-align: middle;"> Pro Media Player
 
 
 A premium, lightweight desktop music player designed for high-quality local listening with **AI-Powered Synced Lyrics** and **Immersive Visuals**.
