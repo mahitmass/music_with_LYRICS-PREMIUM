@@ -15,7 +15,7 @@ Most modern players are either too heavy, hide synced lyrics behind a subscripti
 ### 🚀 How to Run
 
 #### **Option 1: Standalone Installer (Recommended)**
-1.  Navigate to the **`dist/`** (or GitHub Releases) folder.
+1.  Navigate to the GitHub Releases folder.
 2.  Download **`Music Player Mass Setup 2.0.0.exe`**.
 3.  Run the installer to add the player to your Start Menu and Desktop.
 
