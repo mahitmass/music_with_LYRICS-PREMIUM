@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const { fork } = require('child_process');
-
-// We have removed YTMod and ytdl to stop the 403 Forbidden crashes
+const http = require('http');
+const youtubeDl = require('youtube-dl-exec');
 
 app.commandLine.appendSwitch('js-flags', '--optimize_for_size --max_old_space_size=256');
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -35,6 +35,79 @@ function downloadAudioToTemp(audioPath) {
     });
   });
 }
+
+// ==========================================
+// --- YT-DLP BULLETPROOF STREAM SERVER ---
+// ==========================================
+let ytStreamPort = 0;
+
+function startYTStreamServer() {
+    const server = http.createServer(async (req, res) => {
+        const ytId = decodeURIComponent(req.url.slice(1));
+        if (!ytId) { res.writeHead(400); res.end(); return; }
+
+        try {
+            // yt-dlp resolves the real CDN URL — much more reliable
+            const rawUrl = await youtubeDl(`https://www.youtube.com/watch?v=${ytId}`, {
+                format: 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
+                getUrl: true,
+                noWarnings: true,
+                noCheckCertificates: true,
+            });
+
+            const audioUrl = (rawUrl || '').trim().split('\n')[0];
+            if (!audioUrl || !audioUrl.startsWith('http')) throw new Error('No URL returned');
+
+            const urlObj = new URL(audioUrl);
+            const lib = urlObj.protocol === 'https:' ? https : http;
+
+            // Forward range header so seeking works
+            const reqHeaders = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://www.youtube.com/',
+                'Origin': 'https://www.youtube.com',
+            };
+            if (req.headers['range']) reqHeaders['Range'] = req.headers['range'];
+
+            lib.get({
+                hostname: urlObj.hostname,
+                path: urlObj.pathname + urlObj.search,
+                headers: reqHeaders
+            }, (proxyRes) => {
+                const resHeaders = {
+                    'Content-Type': proxyRes.headers['content-type'] || 'audio/webm',
+                    'Access-Control-Allow-Origin': '*',
+                    'Accept-Ranges': 'bytes',
+                };
+                if (proxyRes.headers['content-length']) resHeaders['Content-Length'] = proxyRes.headers['content-length'];
+                if (proxyRes.headers['content-range']) resHeaders['Content-Range'] = proxyRes.headers['content-range'];
+
+                res.writeHead(proxyRes.statusCode, resHeaders);
+                proxyRes.pipe(res);
+                req.on('close', () => proxyRes.destroy());
+            }).on('error', (e) => {
+                console.error('[YT Proxy error]', e.message);
+                if (!res.headersSent) res.writeHead(500);
+                res.end();
+            });
+
+        } catch (e) {
+            console.error('[YT Stream failed]', e.message);
+            if (!res.headersSent) res.writeHead(500);
+            res.end();
+        }
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+        ytStreamPort = server.address().port;
+        console.log(`[YT Stream Server] port ${ytStreamPort}`);
+    });
+}
+
+// 🔥 Start it ONLY ONCE
+startYTStreamServer();
+ipcMain.handle('get-yt-stream-port', () => ytStreamPort);
+
 
 if (!gotTheLock) {
   app.quit(); 
@@ -222,7 +295,6 @@ if (!gotTheLock) {
         console.log("Starting DIRECT ASYNC C++ Whisper transcription for:", transcribePath);
 
         const cp = require('child_process');
-        // 🔥 THE MAGIC UN-FREEZER: We convert the synchronous exec into an asynchronous Promise!
         const util = require('util');
         const execAsync = util.promisify(cp.exec);
         
@@ -243,14 +315,12 @@ if (!gotTheLock) {
         }
 
         console.log("Converting audio to 16kHz WAV format (Async)...");
-        // 🔥 FIX 1: We use 'await execAsync' so the main UI never freezes during conversion
         await execAsync(`"${ffmpegPath}" -y -i "${transcribePath}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
 
         console.log("Running AI Engine (Async)...");
         let output;
         
         try {
-            // 🔥 FIX 2: We use 'await execAsync' so you can keep clicking/scrolling during AI generation
             const { stdout } = await execAsync(`"${mainExe}" -m "${modelPath}" -f "${tempWavPath}"`, { 
                 maxBuffer: 1024 * 1024 * 10 
             });
@@ -297,6 +367,15 @@ if (!gotTheLock) {
             try { fs.unlinkSync(tempFilePath); } catch(e) {}
         }
       }
+    });
+
+    // ==========================================
+    // --- CLEANUP WEIRD YTDL CACHE FILES ---
+    // ==========================================
+    fs.readdirSync(__dirname).forEach(file => {
+        if (file.endsWith('-player-script.js')) {
+            try { fs.unlinkSync(path.join(__dirname, file)); } catch(e) {}
+        }
     });
 
     win = new BrowserWindow({

@@ -20,6 +20,8 @@ window.openSearchMenu = function (e) { e.preventDefault(); };
 // ==========================================
 let lyricsEnabled = localStorage.getItem('lyricsEnabled') !== 'false';
 const { webUtils, ipcRenderer } = require('electron');
+let ytStreamPort = null;
+ipcRenderer.invoke('get-yt-stream-port').then(p => { ytStreamPort = p; });
 const fs = require('fs');
 const path = require('path');
 
@@ -44,9 +46,11 @@ let swipeCooldown = false;
 // ==========================================
 const PRIMARY_API = 'https://saavn.sumit.co/api';
 const FALLBACK_API = 'https://jiosaavn-api-v3.vercel.app/api';
+const YOUTUBE_API_KEY = "AIzaSyBdRzlUo8JQ_fsrlY3SokFfhwYYW1kKrv8";
 const INVALID_ARTISTS = new Set(['', 'unknown', 'unknown artist']);
 const VARIANT_TERMS = ['sped up', 'spedup', 'slowed', 'reverb', 'remix', 'lofi', 'lo-fi', 'nightcore'];
 const TIME_BUCKETS = ['Morning', 'Afternoon', 'Evening', 'Late Night'];
+
 
 // ==========================================
 // --- AI USER MODEL (shared with playlist.js) ---
@@ -401,6 +405,33 @@ function play(i) {
             if (typeof fallbackArt === 'function') fallbackArt(s.t || 'Unknown');
         }
 
+        // 🔥 YOUTUBE: Direct stream via internal Node server!
+        if (s.ytId) {
+            const localAudio = document.getElementById('player');
+            if (localAudio) { localAudio.pause(); localAudio.removeAttribute('src'); }
+            if (typeof showToast === 'function') showToast(`▶ Fetching: ${s.t}`);
+
+            s.needsAudioStream = false;
+            if (typeof saveState === 'function') saveState(); 
+
+            // Connect to our dynamic streaming server
+            if (!ytStreamPort) {
+                ipcRenderer.invoke('get-yt-stream-port').then(p => {
+                    ytStreamPort = p;
+                    s.p = `http://127.0.0.1:${ytStreamPort}/${encodeURIComponent(s.ytId)}`;
+                    safePlay(s.p);
+                });
+            } else {
+                s.p = `http://127.0.0.1:${ytStreamPort}/${encodeURIComponent(s.ytId)}`;
+                safePlay(s.p);
+            }
+
+            if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
+            if (typeof getLyrics === 'function') getLyrics(s);
+            if (typeof startListeningSession === 'function') startListeningSession(s);
+            return;
+        }
+
         // YT song with no audio URL — search JioSaavn directly
         if (s.needsAudioStream && !s.p) {
             showToast(`Finding stream for: ${s.t}...`);
@@ -503,14 +534,10 @@ function play(i) {
 }
 
 function togglePlay() {
-    if (!audio.src) return;
-    if (audio.paused) {
-        audio.play();
-        if (!hasAutoSwitchedToImmersive) {
-            hasAutoSwitchedToImmersive = true;
-            switchToPlayerView();
-        }
-    } else { audio.pause(); }
+    const localAudio = document.getElementById('player');
+    if (!localAudio || !localAudio.src) return;
+    if (localAudio.paused) localAudio.play();
+    else localAudio.pause();
 }
 
 function advanceQueueToNext() {
@@ -681,50 +708,119 @@ function filterQueue(query, targetId, isImmersive = false) {
 async function fetchOnlineSearch(query, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    try {
-        let res = await fetchWithFallback(`/search/songs?query=${encodeURIComponent(query)}&limit=40`);
-        if (!res.ok) throw new Error("API Blocked");
-        let json = await res.json();
-        let results = (json.data && json.data.results) ? json.data.results : [];
-        results = results
-            .map(song => ({ song, score: scoreApiSongMatch(song, query) }))
-            .filter(entry => entry.score > -120)
-            .sort((a, b) => b.score - a.score)
-            .map(entry => entry.song);
+    
+    let html = "";
+    let totalResultsCount = 0;
 
-        if (results.length > 0) {
-            let html = "";
-            results.forEach(song => {
-                let title = (song.name || "Unknown").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-                let artist = "Unknown";
-                if (song.artists && song.artists.primary && song.artists.primary.length > 0) {
-                    artist = song.artists.primary[0].name.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-                }
-                let cover = song.image?.length > 0 ? song.image[song.image.length - 1].url : "";
-                let downloadLink = getWorkingUrl(song.downloadUrl);
-                if (downloadLink) {
+    // ==========================================
+    // 1. FETCH & RENDER YOUTUBE MUSIC (TOP PRIORITY - LIMIT 8 - RED)
+    // ==========================================
+    try {
+        const enhancedQuery = query.toLowerCase().includes('song') ? query : query + ' song';
+        let ytRes = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=8&q=${encodeURIComponent(enhancedQuery)}&key=${YOUTUBE_API_KEY}`);
+        
+        if (ytRes.ok) {
+            const ytData = await ytRes.json();
+            if (ytData.items && ytData.items.length > 0) {
+                ytData.items.forEach(item => {
+                    let rawTitle = decodeHtmlText(item.snippet.title);
+                    let rawArtist = decodeHtmlText(item.snippet.channelTitle);
+                    
+                    let title = rawTitle.replace(/\(Official.*?\)/gi, '').replace(/\[Official.*?\]/gi, '').replace(/\(Audio\)/gi, '').replace(/- Topic/gi, '').trim();
+                    let artist = rawArtist.replace(/- Topic/gi, '').trim();
+
+                    // --- NEW: CLEAN DUPLICATE ARTIST NAMES FROM TITLE ---
+                    let lowerTitle = title.toLowerCase();
+                    let lowerArtist = artist.toLowerCase();
+
+                    if (lowerTitle.startsWith(lowerArtist + ' - ')) {
+                        // Example: "Artist - Song Name" -> "Song Name"
+                        title = title.substring(artist.length + 3).trim();
+                    } else if (title.includes(' - ')) {
+                        // Fallback: If it's something like "ArtistVevo - Song Name"
+                        let parts = title.split(' - ');
+                        if (parts[0].toLowerCase().includes(lowerArtist) || lowerArtist.includes(parts[0].toLowerCase())) {
+                            title = parts.slice(1).join(' - ').trim();
+                        }
+                    }
+                    if (title.endsWith('-')) title = title.slice(0, -1).trim();
+                    // ----------------------------------------------------
+
+                    let cover = item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url || "";
+                    let ytId = item.id.videoId;
+
                     let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                     let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                    let safeC = cover ? cover.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
-                    let safeDL = downloadLink.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeC = cover.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                    // Create the perfect song object
+                    let songObj = { t: title, a: artist, cover: cover, ytId: ytId, isOnline: true, p: "", needsAudioStream: true };
+                    let encodedSong = encodeURIComponent(JSON.stringify(songObj));
+
+                    totalResultsCount++;
                     html += `
-                    <div class="item" data-type="search-result" data-title="${safeT}" data-artist="${safeA}" data-cover="${safeC}" data-url="${safeDL}" data-ytid="${song.videoId || ''}" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}')" style="cursor:pointer; border-left: 3px solid #4cc2ff; align-items: center; padding: 8px 10px;">
-                    <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
-                    <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
-                        <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                        <span class="material-icons-round" style="font-size:14px; color:var(--dim); vertical-align:middle; margin-right:4px;">cloud_download</span>${title}
+                    <div class="item" data-type="search-result" onclick="if(typeof act === 'function') act('${encodedSong}'); else playSearchItem('${encodedSong}', '${containerId}')" style="cursor:pointer; border-left: 3px solid #ff4c4c; align-items: center; padding: 8px 10px;">
+                        <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+                        <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
+                            <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                <span class="material-icons-round" style="font-size:14px; color:#ff4c4c; vertical-align:middle; margin-right:4px;">play_circle</span>${title}
+                            </div>
+                            <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${artist} <small style="color:#ff4c4c; font-size:0.65rem; margin-left:4px; border:1px solid #ff4c4c; padding:0px 3px; border-radius:3px;">YT</small></div>
                         </div>
-                        <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${artist}</div>
-                    </div>
                     </div>`;
-                }
-            });
-            container.innerHTML = html || `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No playable streams found.</div>`;
-        } else {
-            container.innerHTML = `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No global results found.</div>`;
+                });
+            }
         }
     } catch (e) {
-        container.innerHTML = `<div style="padding:10px; color:#ff4c4c; text-align:center; font-size: 0.85rem;">Online Search Offline (${e.message}). Try again.</div>`;
+        console.error("YouTube Search Layer Failed:", e);
+    }
+
+    // ==========================================
+    // 2. FETCH & RENDER JIOSAAVN (FALLBACK LAYER - LIMIT 5 - BLUE)
+    // ==========================================
+    try {
+        let saavnRes = await fetchWithFallback(`/search/songs?query=${encodeURIComponent(query)}&limit=5`);
+        if (saavnRes.ok) {
+            let saavnJson = await saavnRes.json();
+            let saavnResults = saavnJson.data?.results || saavnJson.data?.songs?.results || [];
+            
+            if (saavnResults.length > 0) {
+                saavnResults.forEach(song => {
+                    let title = decodeHtmlText(song.name || song.title || '');
+                    let artist = getSongArtist(song);
+                    let cover = song.image?.[2]?.url || song.image?.[song.image.length - 1]?.url || '';
+                    let downloadUrl = getWorkingUrl(song.downloadUrl) || '';
+
+                    let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeC = cover.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    let safeDL = downloadUrl.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                    totalResultsCount++;
+                    html += `
+                    <div class="item" data-type="search-result" data-title="${safeT}" data-artist="${safeA}" data-cover="${safeC}" data-url="${safeDL}" data-ytid="" onclick="addNextOnline('${safeT}', '${safeA}', '${safeC}', '${safeDL}', '')" style="cursor:pointer; border-left: 3px solid #0076ff; align-items: center; padding: 8px 10px;">
+                        <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+                        <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
+                            <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                <span class="material-icons-round" style="font-size:14px; color:#0076ff; vertical-align:middle; margin-right:4px;">cloud_download</span>${title}
+                            </div>
+                            <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${artist} <small style="color:#0076ff; font-size:0.65rem; margin-left:4px; border:1px solid #0076ff; padding:0px 3px; border-radius:3px;">SAAVN</small></div>
+                        </div>
+                    </div>`;
+                });
+            }
+        }
+    } catch (e) {
+        console.error("JioSaavn Search Layer Failed:", e);
+    }
+
+    // ==========================================
+    // 3. UI RENDER GUARD
+    // ==========================================
+    if (totalResultsCount > 0) {
+        container.innerHTML = html;
+    } else {
+        container.innerHTML = `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No mixed online results found.</div>`;
     }
 }
 
@@ -1038,5 +1134,6 @@ window.scrollToCurrentSong = function () {
         }, 150);
     } catch (e) { console.warn("Scroll bypassed safely."); }
 };
+
 
 //yo
