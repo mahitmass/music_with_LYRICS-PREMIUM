@@ -1,10 +1,10 @@
-# 七 Pro Media Player
+# 🎵 Pro Media Player
 
 A premium, lightweight desktop music player designed for high-quality local listening with **AI-Powered Synced Lyrics** and **Immersive Visuals**.
 
 ---
 
-### 検 Overview
+### 🌟 Overview
 Most modern players are either too heavy, hide synced lyrics behind a subscription, or completely fail when a song isn't in their database. This player focuses on:
 * **Privacy & Speed**: It plays your local `.mp3` files without tracking your data.
 * **Smart Syncing**: Fetches perfect lyrics from the LRCLIB database, and uses Local AI to automatically sync plain text when timed lyrics don't exist.
@@ -12,7 +12,7 @@ Most modern players are either too heavy, hide synced lyrics behind a subscripti
 
 ---
 
-### 噫 How to Run
+### 🚀 How to Run
 
 #### **Option 1: Standalone Installer (Recommended)**
 1.  Navigate to the **`dist/`** (or GitHub Releases) folder.
