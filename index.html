@@ -107,6 +107,9 @@
         <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; padding-bottom: 15px; padding-top: 10px; position: sticky; top: 0; z-index: 110; background: rgba(18, 18, 18, 0.85); backdrop-filter: blur(12px);">
             <button class="yt-btn-secondary" onclick="switchToHomeView()" style="padding: 10px; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.5);"><span class="material-icons-round">arrow_back</span></button>
             <h1 style="font-size: 2.5rem; font-weight: 900; margin: 0;">Listening History</h1>
+            <button class="yt-btn-secondary" onclick="clearHistory()" style="padding: 8px 15px; color: #ff4c4c; border-color: rgba(255, 76, 76, 0.3); background: rgba(255, 76, 76, 0.1);">
+                <span class="material-icons-round" style="font-size: 18px; vertical-align: middle; margin-right: 5px;">delete_sweep</span> Clear All
+            </button>
         </div>
 
         <div id="history-list" style="display: flex; flex-direction: column; gap: 10px;"></div>

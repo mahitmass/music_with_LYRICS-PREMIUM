@@ -134,7 +134,8 @@ async function openPlaylist(playlistId, titleName) {
             cover: safeCover,
             isOnline: true,
             needsAudioStream: true,
-            ytId: song.ytId
+            ytId: song.ytId,
+            isYTPlaylist: true
         };
     });
 
@@ -543,13 +544,23 @@ function lockPlaylistSection() {
 function addToHistory(song) {
     if (!song) return;
     let history = JSON.parse(localStorage.getItem('playHistory') || '[]');
-    const uniqueId = song.p || song.ytId || (song.t + song.a);
-    history = history.filter(s => (s.p || s.ytId || (s.t + s.a)) !== uniqueId);
+    
+    // 🔥 NEW: Flawless Deduplicator
+    // Matches YouTube by exact ID, Saavn by Title+Artist, and Local files by path
+    const getUid = (s) => (s.ytId ? s.ytId : (s.isOnline ? s.t + "::" + s.a : s.p));
+    const currentUid = getUid(song);
+    
+    // Remove any previous entries of this exact song
+    history = history.filter(s => getUid(s) !== currentUid);
+    
+    // Add to the top of history
     history.unshift(song);
+    
     if (history.length > 150) history.pop();
     localStorage.setItem('playHistory', JSON.stringify(history));
+    
     if (document.getElementById('view-history') && document.getElementById('view-history').classList.contains('active')) {
-        renderHistoryView();
+        if (typeof renderHistoryView === 'function') renderHistoryView();
     }
 }
 
@@ -601,6 +612,14 @@ function renderHistoryView() {
         </div>`;
     });
     container.innerHTML = html;
+}
+
+function clearHistory() {
+    if (confirm("Are you sure you want to delete your entire listening history?")) {
+        localStorage.removeItem('playHistory');
+        renderHistoryView();
+        if (typeof showToast === 'function') showToast("History cleared! 🧹");
+    }
 }
 
 function playFromHistory(index) {

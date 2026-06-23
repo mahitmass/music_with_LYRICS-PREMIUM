@@ -324,6 +324,7 @@ function safePlay(url) {
     audio.pause();
     audio.removeAttribute('src');
     if (!url || url.trim() === '') return false;
+    audio.preload = "auto";
     audio.src = url;
     audio.load();
     let playPromise = audio.play();
@@ -409,27 +410,104 @@ function play(i) {
         if (s.ytId) {
             const localAudio = document.getElementById('player');
             if (localAudio) { localAudio.pause(); localAudio.removeAttribute('src'); }
-            if (typeof showToast === 'function') showToast(`▶ Fetching: ${s.t}`);
+            if (typeof showToast === 'function') showToast(`▶ ${s.t}`);
 
             s.needsAudioStream = false;
             if (typeof saveState === 'function') saveState(); 
+
+            const playYT = (port) => {
+                s.p = `http://127.0.0.1:${port}/${encodeURIComponent(s.ytId)}`;
+                localAudio.preload = "auto";
+                
+                // 🔥 NEW: EMERGENCY CRASH RECOVERY
+                // If YouTube kills the stream (age-restricted/blocked), automatically search for an alternative!
+                const recoveryKey = s.ytId + '_failed';
+                localAudio.onerror = () => {
+                    if (sessionStorage.getItem(recoveryKey)) {
+                        console.error("Alternative stream also failed.");
+                        if (typeof showToast === 'function') showToast(`❌ All alternative streams blocked.`);
+                        setTimeout(() => { if (typeof advanceQueueToNext === 'function') advanceQueueToNext(); }, 2000);
+                        return;
+                    }
+                    console.log("YT Stream Crashed! Engaging emergency alternative search...");
+                    if (typeof showToast === 'function') showToast(`⚠ Stream blocked. Finding alternative...`);
+                    
+                    // Mark this specific video ID as broken so we don't try it again
+                    sessionStorage.setItem(recoveryKey, 'true');
+                    
+                    // Nuke the broken ID and trigger the auto-recover block below
+                    s.ytId = null;
+                    s.isYTPlaylist = true; 
+                    s.needsAudioStream = true;
+                    s.p = '';
+                    play(curIdx); 
+                };
+
+                safePlay(s.p);
+            };
 
             // Connect to our dynamic streaming server
             if (!ytStreamPort) {
                 ipcRenderer.invoke('get-yt-stream-port').then(p => {
                     ytStreamPort = p;
-                    s.p = `http://127.0.0.1:${ytStreamPort}/${encodeURIComponent(s.ytId)}`;
-                    safePlay(s.p);
+                    playYT(p);
                 });
             } else {
-                s.p = `http://127.0.0.1:${ytStreamPort}/${encodeURIComponent(s.ytId)}`;
-                safePlay(s.p);
+                playYT(ytStreamPort);
             }
 
             if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
             if (typeof getLyrics === 'function') getLyrics(s);
             if (typeof startListeningSession === 'function') startListeningSession(s);
             return;
+        }
+
+        // 🔥 NEW: UNFILTERED AUTO-RECOVERY FOR MISSING/BROKEN YT TRACKS
+        if (s.isYTPlaylist && !s.ytId && s.needsAudioStream && !s.p) {
+            if (typeof showToast === 'function') showToast(`🔍 Searching global YouTube for: ${s.t}...`);
+            
+            (async () => {
+                try {
+                    // We removed the strict "Music Category" filter.
+                    // This does a raw, open search just like you asked!
+                    const query = encodeURIComponent(s.t + ' ' + s.a);
+                    const apiKey = typeof window !== 'undefined' && window.YOUTUBE_API_KEY ? window.YOUTUBE_API_KEY : YOUTUBE_API_KEY;
+                    
+                    // We pull the top 3 results just in case the first one is the broken one we just skipped
+                    const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=3&q=${query}&key=${apiKey}`);
+                    const data = await res.json();
+                    
+                    if (data.items && data.items.length > 0) {
+                        let newId = null;
+                        
+                        // Pick the very first result that we haven't already marked as 'failed'
+                        for (let item of data.items) {
+                            if (!sessionStorage.getItem(item.id.videoId + '_failed')) {
+                                newId = item.id.videoId;
+                                break;
+                            }
+                        }
+                        
+                        if (newId) {
+                            s.ytId = newId; 
+                            s.isYTPlaylist = false; // Turn off flag to prevent infinite loops
+                            if (typeof saveState === 'function') saveState();
+                            play(curIdx); // Play the newly found alternative video
+                        } else {
+                            s.isYTPlaylist = false; 
+                            play(curIdx); // Fallback to JioSaavn if all 3 alternatives failed
+                        }
+                    } else {
+                        s.isYTPlaylist = false; 
+                        play(curIdx);
+                    }
+                } catch(e) {
+                    console.error("YT Recovery Failed:", e);
+                    s.isYTPlaylist = false;
+                    play(curIdx);
+                }
+            })();
+            return; 
         }
 
         // YT song with no audio URL — search JioSaavn directly
@@ -481,7 +559,7 @@ function play(i) {
                                 .sort((a, b) => {
                                     const scoreDiff = b.score - a.score;
                                     if (Math.abs(scoreDiff) > 15) return scoreDiff;
-                                    if (audio.duration > 0) {
+                                    if (audio && audio.duration > 0) {
                                         const dA = Math.abs((a.r.duration || 0) - audio.duration);
                                         const dB = Math.abs((b.r.duration || 0) - audio.duration);
                                         return dA - dB;
@@ -535,7 +613,20 @@ function play(i) {
 
 function togglePlay() {
     const localAudio = document.getElementById('player');
-    if (!localAudio || !localAudio.src) return;
+    if (!localAudio) return;
+
+    const s = typeof queue !== 'undefined' ? queue[curIdx] : null;
+    if (!s) return;
+
+    // Detect if we just booted up and the saved YouTube URL has yesterday's dead port
+    const isStaleYT = s.isOnline && s.ytId && s.p && typeof ytStreamPort !== 'undefined' && ytStreamPort && !s.p.includes(`:${ytStreamPort}/`);
+    
+    // If audio source is missing, or needs an API fetch, or port is dead -> Fetch it seamlessly
+    if (!localAudio.src || localAudio.src.endsWith('null') || s.needsAudioStream || isStaleYT) {
+        if (typeof play === 'function') play(curIdx);
+        return;
+    }
+
     if (localAudio.paused) localAudio.play();
     else localAudio.pause();
 }
@@ -616,6 +707,28 @@ async function preloadNextSong() {
     if (nextIdx >= queue.length) return;
     if (lastPreloadedIdx === nextIdx) return;
     const nextSong = queue[nextIdx];
+
+    if (nextSong.isOnline && nextSong.ytId) {
+        lastPreloadedIdx = nextIdx;
+        console.log(`[Preloader] Silently caching next YT track: ${nextSong.t}...`);
+        
+        // Grab port if we don't have it yet
+        if (typeof ytStreamPort === 'undefined' || !ytStreamPort) {
+            ytStreamPort = await ipcRenderer.invoke('get-yt-stream-port');
+        }
+        
+        // Assign the native URL early
+        nextSong.p = `http://127.0.0.1:${ytStreamPort}/${encodeURIComponent(nextSong.ytId)}`;
+        nextSong.needsAudioStream = false;
+        if (typeof saveState === 'function') saveState();
+        
+        // Create a Ghost Audio tag to force the browser to download the next song into cache right now
+        const ghostAudio = new Audio();
+        ghostAudio.preload = "auto";
+        ghostAudio.src = nextSong.p;
+        return; 
+    }
+
     if (!nextSong.isOnline || (!nextSong.needsAudioStream && nextSong.p)) return;
     lastPreloadedIdx = nextIdx;
     console.log(`[Preloader] Silently fetching audio for next track: ${nextSong.t}...`);
@@ -1021,11 +1134,9 @@ document.addEventListener('keydown', (e) => {
             e.preventDefault(); togglePlay(); break;
         case 'arrowleft':
             e.preventDefault();
-            if (audio.duration) audio.currentTime = Math.max(0, audio.currentTime - 0);
             break;
         case 'arrowright':
             e.preventDefault();
-            if (audio.duration) audio.currentTime = Math.min(audio.duration, audio.currentTime + 0);
             break;
         case 'arrowup':
             e.preventDefault();
@@ -1071,8 +1182,6 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'MediaTrackNext') playNext();
     if (e.key === 'MediaTrackPrevious') playPrev();
     if (e.key === 'MediaPlayPause') togglePlay();
-    if (e.key === 'ArrowUp') { e.preventDefault(); audio.volume = Math.min(1, audio.volume + 0.05); volSlider.value = audio.volume; localStorage.setItem('playerVol', audio.volume); }
-    if (e.key === 'ArrowDown') { e.preventDefault(); audio.volume = Math.max(0, audio.volume - 0.05); volSlider.value = audio.volume; localStorage.setItem('playerVol', audio.volume); }
     if (e.key === 'ArrowRight') { if (audio.duration) audio.currentTime = Math.min(audio.duration, audio.currentTime + 10); }
     if (e.key === 'ArrowLeft') { if (audio.duration) audio.currentTime = Math.max(0, audio.currentTime - 10); }
 });
