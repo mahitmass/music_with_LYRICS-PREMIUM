@@ -1,5 +1,6 @@
-# ![Icon Description](assets/my-icon.png)
- Pro Media Player
+![Icon Description](assets/my-icon.png)
+
+# 🎵 Pro Media Player
 
 A premium, lightweight desktop music player designed for high-quality local listening with **AI-Powered Synced Lyrics** and **Immersive Visuals**.
 
