@@ -19,10 +19,23 @@ jobs:
 
       - name: Install Dependencies
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"   # ← prevents the broken postinstall fetch
         run: npm install
 
+      - name: Download yt-dlp binary (authenticated)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p node_modules/youtube-dl-exec/bin
+          curl -L \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
+            -o node_modules/youtube-dl-exec/bin/yt-dlp
+          chmod +x node_modules/youtube-dl-exec/bin/yt-dlp
+
       - name: Build Mac (.dmg) files
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ← added, electron-builder may need it
         run: npx electron-builder --mac --publish never
 
       - name: Upload the final Mac apps
