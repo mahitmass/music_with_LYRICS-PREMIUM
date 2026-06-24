@@ -114,6 +114,7 @@ function startYTStreamServer() {
 // 🔥 Start it ONLY ONCE
 startYTStreamServer();
 ipcMain.handle('get-yt-stream-port', () => ytStreamPort);
+ipcMain.handle('yt-stream-ready', () => ytStreamPort > 0);
 
 
 if (!gotTheLock) {
@@ -150,7 +151,7 @@ ipcMain.handle('get-yt-playlist', async (event, playlistId) => {
 // ── 2. The Bulletproof yt-dlp Fallback (No API Limits) ──
 ipcMain.handle('get-yt-playlist-ytdlp', async (event, playlistId) => {
     try {
-        const youtubeDl = require('youtube-dl-exec');
+        // youtubeDl is declared at top of file with ASAR fix already applied
         const result = await youtubeDl(
             `https://www.youtube.com/playlist?list=${playlistId}`,
             {
