@@ -341,7 +341,7 @@ document.addEventListener('contextmenu', (e) => {
             <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
             <div class="context-item" onclick="shareTrackDirect(window.ctxTargetSong)"><span class="material-icons-round">share</span> Share Link</div>
         `;
-    } else {
+ } else {
         return;
     }
 
@@ -352,12 +352,18 @@ document.addEventListener('contextmenu', (e) => {
     menu.style.left = `${e.pageX}px`;
     menu.style.top = `${yPos}px`;
     menu.style.display = 'block';
-    document.body.classList.add('lock-hover-queue');
-});
+    
+    // 🔥 1. The smart check goes HERE, inside the right-click event
+    if (e.target.closest('#hover-q') || e.target.closest('.hover-queue-hitbox')) {
+        document.body.classList.add('lock-hover-queue');
+    }
+}); // <-- End of the right-click listener
 
 document.addEventListener('click', (e) => {
     const menu = document.getElementById('custom-context-menu');
     if (menu && !e.target.closest('#custom-context-menu')) menu.style.display = 'none';
+    
+    // 🔥 2. This MUST be 'remove', so the queue unlocks when you click away!
     document.body.classList.remove('lock-hover-queue');
 });
 

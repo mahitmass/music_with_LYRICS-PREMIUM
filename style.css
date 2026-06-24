@@ -704,7 +704,7 @@ body.retry-mode #retry-overlay { display: flex; opacity: 1; transform: translate
    CUSTOM RIGHT-CLICK CONTEXT MENU
    ========================================= */
 .context-menu {
-    display: none; position: fixed; z-index: 10000; width: 220px;
+    display: none; position: fixed; z-index: 20000 !important; width: 220px;
     background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(25px);
     border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
     box-shadow: 0 15px 35px rgba(0,0,0,0.8); padding: 8px; flex-direction: column;

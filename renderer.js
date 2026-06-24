@@ -820,6 +820,11 @@ function filterQueue(query, targetId, isImmersive = false) {
     searchTimeout = setTimeout(() => fetchOnlineSearch(query, `${targetId}-online`), 800);
 }
 
+// Add these two lines right above the function to initialize the native scraper
+const YTMusicSearch = require('ytmusic-api');
+const ytGlobalApi = new YTMusicSearch();
+let isGlobalApiReady = false;
+
 async function fetchOnlineSearch(query, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -828,66 +833,63 @@ async function fetchOnlineSearch(query, containerId) {
     let totalResultsCount = 0;
 
     // ==========================================
-    // 1. FETCH & RENDER YOUTUBE MUSIC (TOP PRIORITY - LIMIT 8 - RED)
+    // 1. FETCH & RENDER YOUTUBE MUSIC (NATIVE SCRAPER - NO LIMITS - RED)
     // ==========================================
     try {
+        if (!isGlobalApiReady) {
+            await ytGlobalApi.initialize();
+            isGlobalApiReady = true;
+        }
+
         const enhancedQuery = query.toLowerCase().includes('song') ? query : query + ' song';
-        let ytRes = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=8&q=${encodeURIComponent(enhancedQuery)}&key=${YOUTUBE_API_KEY}`);
+        const ytResults = await ytGlobalApi.searchSongs(enhancedQuery);
         
-        if (ytRes.ok) {
-            const ytData = await ytRes.json();
-            if (ytData.items && ytData.items.length > 0) {
-                ytData.items.forEach(item => {
-                    let rawTitle = decodeHtmlText(item.snippet.title);
-                    let rawArtist = decodeHtmlText(item.snippet.channelTitle);
-                    
-                    let title = rawTitle.replace(/\(Official.*?\)/gi, '').replace(/\[Official.*?\]/gi, '').replace(/\(Audio\)/gi, '').replace(/- Topic/gi, '').trim();
-                    let artist = rawArtist.replace(/- Topic/gi, '').trim();
+        if (ytResults && ytResults.length > 0) {
+            ytResults.slice(0, 8).forEach(song => {
+                let title = song.name || 'Unknown';
+                let artist = song.artist?.name || 'Unknown Artist';
+                
+                // --- KEPT YOUR CLEAN DUPLICATE ARTIST NAMES LOGIC ---
+                let lowerTitle = title.toLowerCase();
+                let lowerArtist = artist.toLowerCase();
 
-                    // --- NEW: CLEAN DUPLICATE ARTIST NAMES FROM TITLE ---
-                    let lowerTitle = title.toLowerCase();
-                    let lowerArtist = artist.toLowerCase();
-
-                    if (lowerTitle.startsWith(lowerArtist + ' - ')) {
-                        // Example: "Artist - Song Name" -> "Song Name"
-                        title = title.substring(artist.length + 3).trim();
-                    } else if (title.includes(' - ')) {
-                        // Fallback: If it's something like "ArtistVevo - Song Name"
-                        let parts = title.split(' - ');
-                        if (parts[0].toLowerCase().includes(lowerArtist) || lowerArtist.includes(parts[0].toLowerCase())) {
-                            title = parts.slice(1).join(' - ').trim();
-                        }
+                if (lowerTitle.startsWith(lowerArtist + ' - ')) {
+                    title = title.substring(artist.length + 3).trim();
+                } else if (title.includes(' - ')) {
+                    let parts = title.split(' - ');
+                    if (parts[0].toLowerCase().includes(lowerArtist) || lowerArtist.includes(parts[0].toLowerCase())) {
+                        title = parts.slice(1).join(' - ').trim();
                     }
-                    if (title.endsWith('-')) title = title.slice(0, -1).trim();
-                    // ----------------------------------------------------
+                }
+                if (title.endsWith('-')) title = title.slice(0, -1).trim();
+                // ----------------------------------------------------
 
-                    let cover = item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url || "";
-                    let ytId = item.id.videoId;
+                let cover = song.thumbnails && song.thumbnails.length > 0 ? song.thumbnails[song.thumbnails.length - 1].url : "https://via.placeholder.com/150";
+                let ytId = song.videoId;
 
-                    let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                    let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                    let safeC = cover.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                let safeT = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                let safeA = artist.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                let safeC = cover.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-                    // Create the perfect song object
-                    let songObj = { t: title, a: artist, cover: cover, ytId: ytId, isOnline: true, p: "", needsAudioStream: true };
-                    let encodedSong = encodeURIComponent(JSON.stringify(songObj));
+                // Create the perfect song object
+                let songObj = { t: title, a: artist, cover: cover, ytId: ytId, isOnline: true, p: "", needsAudioStream: true };
+                let encodedSong = encodeURIComponent(JSON.stringify(songObj));
 
-                    totalResultsCount++;
-                    html += `
-                    <div class="item" data-type="search-result" data-song="${encodedSong}" onclick="if(typeof act === 'function') act('${encodedSong}'); else playSearchItem('${encodedSong}', '${containerId}')" style="cursor:pointer; border-left: 3px solid #ff4c4c; align-items: center; padding: 8px 10px;">
-                        <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
-                        <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
-                            <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                                <span class="material-icons-round" style="font-size:14px; color:#ff4c4c; vertical-align:middle; margin-right:4px;">play_circle</span>${title}
-                            </div>
-                            <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${artist} <small style="color:#ff4c4c; font-size:0.65rem; margin-left:4px; border:1px solid #ff4c4c; padding:0px 3px; border-radius:3px;">YT</small></div>
+                totalResultsCount++;
+                html += `
+                <div class="item" data-type="search-result" data-song="${encodedSong}" onclick="if(typeof act === 'function') act('${encodedSong}'); else playSearchItem('${encodedSong}', '${containerId}')" style="cursor:pointer; border-left: 3px solid #ff4c4c; align-items: center; padding: 8px 10px;">
+                    <img src="${cover}" style="width:40px; height:40px; border-radius:6px; margin-right:12px; object-fit:cover; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+                    <div style="flex:1; display:flex; flex-direction:column; justify-content:center; overflow:hidden; pointer-events:none;">
+                        <div style="color:white; font-size:0.95rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                            <span class="material-icons-round" style="font-size:14px; color:#ff4c4c; vertical-align:middle; margin-right:4px;">play_circle</span>${title}
                         </div>
-                    </div>`;
-                });
-            }
+                        <div style="color:var(--dim); font-size:0.8rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${artist} <small style="color:#ff4c4c; font-size:0.65rem; margin-left:4px; border:1px solid #ff4c4c; padding:0px 3px; border-radius:3px;">YT</small></div>
+                    </div>
+                </div>`;
+            });
         }
     } catch (e) {
-        console.error("YouTube Search Layer Failed:", e);
+        console.error("Native YouTube Search Layer Failed:", e);
     }
 
     // ==========================================

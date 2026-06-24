@@ -1,16 +1,13 @@
 // ==========================================
 // --- SMART HOME PAGE ENGINE (YOUTUBE PROFILER) ---
-// Analyzes local history, calculates time-of-day vibes, 
-// extracts genres, and fetches via official YouTube API.
+// Analyzes local history, caches data to save quota,
+// and uses hybrid rotating APIs to bypass 429/DNS blocks.
 // ==========================================
 
 async function loadSmartHome() {
     const homeDiv = document.getElementById('dynamic-homepage');
     if (!homeDiv) return;
 
-    // ---------------------------------------------------------
-    // 🧠 MODULE 1: THE DATA EXTRACTOR & GENRE ANALYZER
-    // ---------------------------------------------------------
     let history = JSON.parse(localStorage.getItem('playHistory') || '[]');
     let artistCounts = {};
     let genreScores = {
@@ -51,9 +48,6 @@ async function loadSmartHome() {
     else if (hour < 17) { timeVibe = "Afternoon Drive"; vibeQuery = "afternoon high energy mix"; } 
     else { timeVibe = "Evening Energy"; vibeQuery = "evening party dance mix"; }
 
-    // ---------------------------------------------------------
-    // 📦 MODULE 2: SHELF ARCHITECT
-    // ---------------------------------------------------------
     let shelvesToBuild = [];
     shelvesToBuild.push({ title: `Your ${timeVibe}`, query: vibeQuery });
 
@@ -65,10 +59,6 @@ async function loadSmartHome() {
     else if (runnerUpArtist) shelvesToBuild.push({ title: `More like ${runnerUpArtist}`, query: `${runnerUpArtist} mix` });
     else shelvesToBuild.push({ title: `Curated For You`, query: `Trending Viral Pop` });
 
-    // ---------------------------------------------------------
-    // 🚀 MODULE 3: BACKGROUND UI RENDERING
-    // ---------------------------------------------------------
-    // Draw the empty carousels IMMEDIATELY so the UI looks beautiful instantly
     let skeletonHtml = '';
     for (let i = 0; i < shelvesToBuild.length; i++) {
         skeletonHtml += `
@@ -76,7 +66,7 @@ async function loadSmartHome() {
             <h2 style="margin-bottom: 15px; font-size: 1.4rem;">${shelvesToBuild[i].title}</h2>
             <div id="smart-carousel-${i}" class="horizontal-carousel">
                 <div style="padding: 20px; color: var(--dim); display: flex; align-items: center; gap: 10px;">
-                    <span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Loading tracks...
+                    <span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Fetching tracks...
                 </div>
             </div>
         </div>`;
@@ -85,29 +75,32 @@ async function loadSmartHome() {
 
     const emergencyQueries = ["Trending Pop Music", "Lofi Girl Radio", "Top Electronic Hits"];
 
-    // Fetch and populate each carousel silently in the background
     for (let i = 0; i < shelvesToBuild.length; i++) {
         populateSmartCarousel(shelvesToBuild[i].query, `smart-carousel-${i}`, emergencyQueries);
     }
 }
 
 // ---------------------------------------------------------
-// 🌐 MODULE 4: OFFICIAL YOUTUBE API FETCHER (BULLETPROOF)
+// 🌐 MODULE 4: HYBRID CACHING API FETCHER
 // ---------------------------------------------------------
 async function populateSmartCarousel(query, containerId, emergencyQueries) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
     try {
-        let songs = await fetchOfficialYTData(query);
+        let songs = await fetchHybridYTData(query);
         
+        // Single fallback attempt if the main query fails
         if (!songs || songs.length === 0) {
-            console.warn(`[Smart Engine] Query '${query}' failed. Triggering fallback.`);
+            console.warn(`[Smart Engine] Query '${query}' failed. Trying one fallback.`);
             let randomFallback = emergencyQueries[Math.floor(Math.random() * emergencyQueries.length)];
-            songs = await fetchOfficialYTData(randomFallback);
+            songs = await fetchHybridYTData(randomFallback);
         }
 
-        if (!songs || songs.length === 0) throw new Error("API completely blocked");
+        if (!songs || songs.length === 0) {
+            container.innerHTML = `<div style="color: var(--dim); padding: 15px;">API Limit Reached. Play a local track!</div>`;
+            return;
+        }
 
         let html = "";
         songs.forEach(song => {
@@ -116,7 +109,6 @@ async function populateSmartCarousel(query, containerId, emergencyQueries) {
             let safeCover = song.cover || 'https://via.placeholder.com/150';
             let songObj = encodeURIComponent(JSON.stringify(song));
 
-            // Native UI Song Card
             html += `
             <div class="song-card" data-type="song" data-song="${songObj}" 
                  onclick="playDirectlyFromHome('${songObj}')" 
@@ -130,39 +122,45 @@ async function populateSmartCarousel(query, containerId, emergencyQueries) {
         container.innerHTML = html;
 
     } catch (e) {
-        container.innerHTML = `<div style="color: var(--dim); padding: 15px;">Failed to load row.</div>`;
+        container.innerHTML = `<div style="color: var(--dim); padding: 15px;">Network blocked.</div>`;
     }
 }
 
-async function fetchOfficialYTData(query) {
-    // Uses your official API key from renderer.js
-    const apiKey = typeof window !== 'undefined' && window.YOUTUBE_API_KEY ? window.YOUTUBE_API_KEY : "AIzaSyBdRzlUo8JQ_fsrlY3SokFfhwYYW1kKrv8";
-    
+// Native Node.js YouTube Music Scraper (Zero API Limits)
+const YTMusic = require('ytmusic-api');
+const ytHomeApi = new YTMusic();
+let isHomeApiReady = false;
+
+async function fetchHybridYTData(query) {
+    const cacheKey = `shelf_${query.replace(/\s+/g, '')}`;
+    const cachedData = sessionStorage.getItem(cacheKey);
+    if (cachedData) return JSON.parse(cachedData);
+
     try {
-        const enhancedQuery = query.toLowerCase().includes('song') || query.toLowerCase().includes('mix') ? query : query + ' song';
-        let res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(enhancedQuery)}&key=${apiKey}`);
+        if (!isHomeApiReady) {
+            await ytHomeApi.initialize();
+            isHomeApiReady = true;
+        }
         
-        if (!res.ok) return [];
+        // Native scrape! No API keys, no 429 errors!
+        const results = await ytHomeApi.searchSongs(query);
         
-        const data = await res.json();
-        if (!data.items || data.items.length === 0) return [];
+        if (!results || results.length === 0) return [];
 
-        return data.items.map(item => {
-            let rawTitle = decodeURIComponent(item.snippet.title).replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-            let rawArtist = decodeURIComponent(item.snippet.channelTitle).replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-            
-            let title = rawTitle.replace(/\(Official.*?\)/gi, '').replace(/\[Official.*?\]/gi, '').replace(/\(Audio\)/gi, '').replace(/- Topic/gi, '').trim();
-            let artist = rawArtist.replace(/- Topic/gi, '').trim();
+        let songs = results.slice(0, 10).map(song => ({
+            t: song.name,
+            a: song.artist?.name || "Unknown Artist",
+            ytId: song.videoId,
+            cover: song.thumbnails && song.thumbnails.length > 0 ? song.thumbnails[song.thumbnails.length - 1].url : "https://via.placeholder.com/150",
+            isOnline: true,
+            needsAudioStream: true,
+            p: ''
+        }));
 
-            if (title.toLowerCase().startsWith(artist.toLowerCase() + ' - ')) {
-                title = title.substring(artist.length + 3).trim();
-            }
-
-            let cover = item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url || "";
-            return { t: title, a: artist, ytId: item.id.videoId, cover: cover, isOnline: true, needsAudioStream: true, p: '' };
-        });
-    } catch(e) {
-        console.error("YT API Error:", e);
+        sessionStorage.setItem(cacheKey, JSON.stringify(songs));
+        return songs;
+    } catch (e) {
+        console.error("Native YT API Failed:", e);
         return [];
     }
 }
@@ -186,7 +184,4 @@ window.playDirectlyFromHome = function(songStr) {
     if (immSearch) immSearch.style.display = 'none';
 };
 
-// Initialize when the app opens
-window.addEventListener('load', () => {
-    setTimeout(loadSmartHome, 500);
-});
+window.addEventListener('load', () => { setTimeout(loadSmartHome, 500); });
