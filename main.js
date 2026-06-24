@@ -134,154 +134,50 @@ if (!gotTheLock) {
         try { fs.unlinkSync(cookiePath); } catch(e) {}
     }
 
-    // ==========================================
-    // --- INVINCIBLE INFINITE SCRAPER ---
-    // ==========================================
-    ipcMain.handle('get-yt-playlist', async (event, playlistId) => {
-      try { 
-        console.log("Scraping standard YouTube for playlist:", playlistId);
-        
-        const baseHeaders = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' };
-        const res = await fetch(`https://www.youtube.com/playlist?list=${playlistId}`, { headers: baseHeaders });
-        const html = await res.text();
+    // ── 1. The YT Music Scraper (Moved to backend to stop red header errors) ──
+ipcMain.handle('get-yt-playlist', async (event, playlistId) => {
+    try {
+        const YTMusic = require('ytmusic-api');
+        const ytmusic = new YTMusic();
+        await ytmusic.initialize();
+        return await ytmusic.getPlaylist(playlistId);
+    } catch (e) {
+        console.warn('ytmusic-api playlist fetch failed:', e.message);
+        return null;
+    }
+});
 
-        let title = "Custom Playlist";
-        const titleMatch = html.match(/<title>(.*?) - YouTube<\/title>/);
-        if (titleMatch) title = titleMatch[1];
-
-        // ROBUST JSON EXTRACTOR - finds the full object regardless of newlines!
-        let startIdx = html.indexOf('var ytInitialData = ') !== -1 
-            ? html.indexOf('var ytInitialData = ') + 'var ytInitialData = '.length
-            : html.indexOf('window["ytInitialData"] = ') + 'window["ytInitialData"] = '.length;
-        
-        let data = null;
-        if (startIdx > 30) {
-            let depth = 0, inStr = false, escape = false, endIdx = startIdx;
-            for (let c = startIdx; c < html.length; c++) {
-                const ch = html[c];
-                if (escape) { escape = false; continue; }
-                if (ch === '\\' && inStr) { escape = true; continue; }
-                if (ch === '"') { inStr = !inStr; continue; }
-                if (inStr) continue;
-                if (ch === '{') depth++;
-                else if (ch === '}') { depth--; if (depth === 0) { endIdx = c + 1; break; } }
+// ── 2. The Bulletproof yt-dlp Fallback (No API Limits) ──
+ipcMain.handle('get-yt-playlist-ytdlp', async (event, playlistId) => {
+    try {
+        const youtubeDl = require('youtube-dl-exec');
+        const result = await youtubeDl(
+            `https://www.youtube.com/playlist?list=${playlistId}`,
+            {
+                flatPlaylist: true,
+                dumpSingleJson: true,
+                noWarnings: true,
+                noCheckCertificate: true,
             }
-            try { data = JSON.parse(html.slice(startIdx, endIdx)); } catch(e) { data = null; }
-        }
+        );
 
-        // PLAN B: If blocked or parsing fails, try Piped API Mirrors
-        if (!data) {
-            console.log("Engaging Plan B (Piped Mirrors)...");
-            const pipedServers = ["https://pipedapi.tokhmi.xyz", "https://api.piped.projectsegfau.lt", "https://piped-api.lunar.icu", "https://watchapi.whatever.social"];
-            let pipedData = null;
-            
-            for (const server of pipedServers) {
-                try {
-                    const pipedRes = await fetch(`${server}/playlists/${playlistId}`);
-                    if (pipedRes.ok) { 
-                        pipedData = await pipedRes.json(); 
-                        break; 
-                    }
-                } catch(e) { console.log(`Server ${server} failed, trying next...`); }
-            }
-            
-            if (!pipedData) throw new Error("All Piped API servers are offline");
-            
-            let songs = pipedData.relatedStreams.map(s => {
-                let videoId = s.url ? s.url.split('v=')[1] : null; 
-                return {
-                    name: s.title,
-                    artists: [{ name: s.uploaderName }],
-                    thumbnails: [{ url: s.thumbnail }],
-                    ytId: videoId
-                };
-            });
-            return { title: pipedData.name || title, songs };
-        }
+        if (!result || !result.entries) return null;
 
-        let songs = [];
-
-        function extractSongs(items) {
-            if (!items) return;
-            items.forEach(item => {
-                let vid = item.playlistVideoRenderer;
-                if (vid && vid.title) {
-                    let artist = vid.shortBylineText ? vid.shortBylineText.runs.map(r => r.text).join('') : "Unknown Artist";
-                    let vId = vid.videoId; 
-                    songs.push({
-                        name: vid.title.runs[0].text,
-                        artists: [{ name: artist }],
-                        thumbnails: vid.thumbnail.thumbnails,
-                        ytId: vId 
-                    });
-                }
-            });
-        }
-
-        const tabs = data.contents?.twoColumnBrowseResultsRenderer?.tabs;
-        let listRenderer = tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents?.[0]?.playlistVideoListRenderer;
-        
-        if (listRenderer && listRenderer.contents) extractSongs(listRenderer.contents);
-
-        let apiKeyMatch = html.match(/"INNERTUBE_API_KEY":"(.*?)"/);
-        let clientVerMatch = html.match(/"clientVersion":"(.*?)"/);
-        let apiKey = apiKeyMatch ? apiKeyMatch[1] : null;
-        let clientVer = clientVerMatch ? clientVerMatch[1] : "2.20240410.01.00"; 
-
-        function findToken(obj) {
-            if (!obj || typeof obj !== 'object') return null;
-            if (obj.continuationCommand?.token) return obj.continuationCommand.token;
-            if (obj.continuationEndpoint?.continuationCommand?.token) return obj.continuationEndpoint.continuationCommand.token;
-            for (let key in obj) {
-                if (typeof obj[key] === 'object') {
-                    let t = findToken(obj[key]);
-                    if (t) return t;
-                }
-            }
-            return null;
-        }
-
-        let token = findToken(listRenderer) || findToken(data);
-        let pagesFetched = 0;
-
-        while (token && apiKey && pagesFetched < 30) {
-            pagesFetched++;
-            console.log(`Fetching playlist page ${pagesFetched + 1}...`);
-            
-            const nextRes = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 
-                    ...baseHeaders,
-                    'Content-Type': 'application/json',
-                    'Origin': 'https://www.youtube.com',
-                    'Referer': `https://www.youtube.com/playlist?list=${playlistId}`,
-                    'X-YouTube-Client-Name': '1', 
-                    'X-YouTube-Client-Version': clientVer
-                },
-                body: JSON.stringify({
-                    context: { client: { clientName: "WEB", clientVersion: clientVer, hl: "en", gl: "US" } },
-                    continuation: token
-                })
-            });
-            
-            const nextData = await nextRes.json();
-            const nextActions = nextData.onResponseReceivedActions;
-            if (!nextActions) break;
-            
-            const appendItems = nextActions[0]?.appendContinuationItemsAction?.continuationItems;
-            if (!appendItems) break;
-
-            extractSongs(appendItems);
-            token = findToken(nextActions);
-        }
-
-        console.log(`Successfully scraped ${songs.length} total songs!`);
-        return { title, songs };
-      } catch (error) { 
-        console.error("Scraper Error:", error.message);
-        return null; 
-      }
-    });
+        return {
+            title: result.title,
+            name:  result.title,
+            songs: result.entries.map(entry => ({
+                name:       entry.title,
+                artists:    [{ name: entry.uploader || entry.channel || 'Unknown Artist' }],
+                thumbnails: [{ url: entry.thumbnail || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg` }],
+                ytId: entry.id
+            }))
+        };
+    } catch (e) {
+        console.error('yt-dlp playlist fetch failed:', e.message);
+        return null;
+    }
+});
 
     // ==========================================
     // --- TASK 2: NATIVE C++ AI TRANSCRIPTION ---

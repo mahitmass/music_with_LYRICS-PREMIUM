@@ -166,10 +166,23 @@ async function fetchHybridYTData(query) {
 }
 
 // ---------------------------------------------------------
-// ▶️ MODULE 5: INJECTION HANDLER
+// ▶️ MODULE 5: INJECTION HANDLER (WITH PLAYLIST INTERCEPTOR)
 // ---------------------------------------------------------
 window.playDirectlyFromHome = function(songStr) {
     let song = JSON.parse(decodeURIComponent(songStr));
+    
+    // 🔥 THE INTERCEPTOR: If a playlist sneaks onto the home page, catch it!
+    // Playlist IDs from YouTube always start with 'PL', 'VLPL', or 'RD'
+    if (song.ytId && (song.ytId.startsWith('PL') || song.ytId.startsWith('VLPL') || song.ytId.startsWith('RD'))) {
+        if (typeof showToast === 'function') showToast("Routing to Playlist View...");
+        if (typeof openPlaylist === 'function') {
+            // Open it cleanly in your Playlist Viewer instead of breaking the player!
+            openPlaylist(song.ytId, song.t);
+        }
+        return;
+    }
+
+    // Normal Song Logic continues...
     const insertPos = typeof queue !== 'undefined' && queue.length === 0 ? 0 : curIdx + 1;
     queue.splice(insertPos, 0, song);
     

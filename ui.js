@@ -276,6 +276,9 @@ document.addEventListener('contextmenu', (e) => {
     const playlistCard = e.target.closest('.song-card[data-type="playlist"]');
     const queueItem = e.target.closest('.item[data-type="queue-item"]');
     const globalHistoryItem = e.target.closest('[data-type="history-item"], [data-type="history-search-result"], [data-type="local-search-result"]');
+    
+    // 🔥 NEW: Detect clicks on your imported Library Playlists
+    const sidebarPlaylist = e.target.closest('.playlist-link');
 
     const menu = document.getElementById('custom-context-menu');
     if (!menu) return;
@@ -307,6 +310,14 @@ document.addEventListener('contextmenu', (e) => {
             <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
             <div class="context-item" onclick="addToQueueDirect(window.ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
             <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
+        `;
+    } else if (sidebarPlaylist) {
+        // 🔥 NEW: The custom menu for Sidebar Playlists
+        e.preventDefault();
+        const plId = sidebarPlaylist.getAttribute('data-playlist-id');
+        menuHtml = `
+            <div class="context-item" onclick="addYTPlaylistToQueue('${plId}', 'next')"><span class="material-icons-round">queue_play_next</span> Play Next (All Tracks)</div>
+            <div class="context-item" onclick="addYTPlaylistToQueue('${plId}', 'bottom')"><span class="material-icons-round">playlist_add</span> Add to Bottom (All Tracks)</div>
         `;
     } else if (playlistCard) {
         e.preventDefault();

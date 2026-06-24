@@ -90,12 +90,28 @@ async function preloadSidebarPlaylistNames() {
         const playlistId = link.getAttribute('data-playlist-id');
         if (!playlistId) continue;
         try {
-            const playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId);
-            if (!playlistData) continue;
-            const resolvedName = playlistData.name || playlistData.title;
-            if (!resolvedName) continue;
-            const label = link.querySelector('.playlist-name');
-            if (label) label.innerText = resolvedName;
+            let resolvedName = null;
+            let playlistData = null;
+            
+            try { playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId); } catch(e) {}
+            
+            if (playlistData && (playlistData.name || playlistData.title)) {
+                resolvedName = playlistData.name || playlistData.title;
+            } else {
+                // Fallback for older Standard YouTube playlists
+                try {
+                    let res = await fetch(`https://pipedapi.in.projectsegfau.lt/playlists/${playlistId}`);
+                    if (res.ok) {
+                        let data = await res.json();
+                        resolvedName = data.name;
+                    }
+                } catch(e) {}
+            }
+
+            if (resolvedName) {
+                const label = link.querySelector('.playlist-name');
+                if (label) label.innerText = resolvedName;
+            }
         } catch (e) { console.error('Failed to preload playlist name:', playlistId, e); }
     }
 }
@@ -108,7 +124,31 @@ async function openPlaylist(playlistId, titleName) {
     const tracklistEl = document.getElementById('playlist-tracklist');
     tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);"><span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Scraping tracks from YouTube...</div>`;
 
-    const playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId);
+    let playlistData = null;
+
+    // ATTEMPT 1: Try Native YT Music IPC Scraper
+    try {
+        playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId);
+    } catch (e) {
+        console.warn("IPC Playlist Fetch Error, preparing fallback...");
+    }
+
+    // ATTEMPT 2: yt-dlp via IPC — replaces unreliable proxies and official API limits
+    if (!playlistData || !playlistData.songs || playlistData.songs.length === 0) {
+        console.log("ytmusic-api failed. Falling back to native yt-dlp...");
+        tracklistEl.innerHTML = `<div style="padding:40px;text-align:center;color:var(--dim);">
+            <span class="material-icons-round" style="animation:spin 1s linear infinite;">sync</span>
+            Fetching via yt-dlp fallback...
+        </div>`;
+        
+        try {
+            playlistData = await ipcRenderer.invoke('get-yt-playlist-ytdlp', playlistId);
+        } catch (e) {
+            console.warn('yt-dlp IPC fallback failed:', e);
+        }
+    }
+
+    // FINAL CHECK: Did both methods fail?
     if (!playlistData || !playlistData.songs || playlistData.songs.length === 0) {
         if (typeof showToast === 'function') showToast("❌ YouTube blocked the request or playlist is private.");
         tracklistEl.innerHTML = `<div style="color: #ff4c4c; padding: 20px; text-align: center; font-weight: bold;">Failed to load. Is the playlist private, or did YouTube block access?</div>`;
@@ -633,4 +673,76 @@ function finalizeListeningSession(reason = 'switch') {
     currentListenSession = null;
 }
 
+// ==========================================
+// --- BACKGROUND PLAYLIST QUEUE INJECTOR ---
+// ==========================================
+window.addYTPlaylistToQueue = async function(playlistId, position) {
+    // Hide the right-click menu instantly
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
+    
+    if (typeof showToast === 'function') showToast("Scraping playlist tracks in background...");
+    console.log(`[BG Scraper] Starting extraction for Playlist ID: ${playlistId}`);
+
+    let playlistData = null;
+    
+    // ATTEMPT 1: Native YT Music IPC
+    try { 
+        playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId); 
+        if (playlistData && playlistData.songs && playlistData.songs.length > 0) {
+            console.log(`[BG Scraper] Success with ytmusic-api! Found ${playlistData.songs.length} songs.`);
+        }
+    } catch(e) {
+        console.warn("[BG Scraper] ytmusic-api threw an error. Moving to fallback.");
+    }
+
+    // ATTEMPT 2: yt-dlp IPC Fallback
+    if (!playlistData || !playlistData.songs || playlistData.songs.length === 0) {
+        console.log("[BG Scraper] Playlist is standard/old format. Engaging yt-dlp fallback...");
+        try { 
+            playlistData = await ipcRenderer.invoke('get-yt-playlist-ytdlp', playlistId); 
+            if (playlistData && playlistData.songs && playlistData.songs.length > 0) {
+                console.log(`[BG Scraper] Success with yt-dlp fallback! Found ${playlistData.songs.length} songs.`);
+            }
+        } catch(e) {
+            console.error("[BG Scraper] yt-dlp fallback also failed:", e);
+        }
+    }
+
+    if (!playlistData || !playlistData.songs || playlistData.songs.length === 0) {
+        console.error("[BG Scraper] ALL ATTEMPTS FAILED.");
+        if (typeof showToast === 'function') showToast("❌ Failed to scrape playlist.");
+        return;
+    }
+
+    // Format all scraped songs so the player understands them
+    let formattedSongs = playlistData.songs.map(song => {
+        let rawCover = song.thumbnails && song.thumbnails.length > 0 ? song.thumbnails[song.thumbnails.length - 1].url : '';
+        let safeCover = rawCover.startsWith('http') ? rawCover : 'https://via.placeholder.com/230';
+        let safeArtist = song.artists && song.artists.length > 0 ? song.artists.map(a => a.name).join(', ') : 'Unknown';
+        return {
+            t: song.name,
+            rawTitle: song.name,
+            a: safeArtist,
+            p: '',
+            cover: safeCover,
+            isOnline: true,
+            needsAudioStream: true,
+            ytId: song.ytId,
+            isYTPlaylist: true
+        };
+    });
+
+    // Safely inject into the queue
+    if (position === 'next') {
+        queue.splice(curIdx + 1, 0, ...formattedSongs);
+        if (typeof showToast === 'function') showToast(`✅ Added ${formattedSongs.length} tracks to play next!`);
+    } else {
+        queue.push(...formattedSongs);
+        if (typeof showToast === 'function') showToast(`✅ Added ${formattedSongs.length} tracks to bottom of queue!`);
+    }
+
+    if (typeof draw === 'function') draw();
+    if (typeof saveState === 'function') saveState();
+};
 //yo
