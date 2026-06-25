@@ -210,8 +210,15 @@
             btn.innerText = lyricsEnabled ? 'subtitles' : 'subtitles_off';
         }
 
-        volSlider.value = localStorage.getItem('playerVol') || 1;
-        audio.volume = volSlider.value;
+        // Safely load and convert the saved volume to a true decimal
+        let savedVol = localStorage.getItem('playerVol');
+        if (savedVol !== null) {
+            audio.volume = parseFloat(savedVol);
+            if (volSlider) volSlider.value = audio.volume;
+        } else {
+            audio.volume = 1;
+            if (volSlider) volSlider.value = 1;
+        }
 
         // Restore dual queue
         const savedMode = localStorage.getItem('activeQMode');
@@ -1169,12 +1176,14 @@
                 audio.volume = Math.min(1, audio.volume + 0.05);
                 showToast(`Volume: ${Math.round(audio.volume * 100)}%`);
                 if (volSlider) volSlider.value = audio.volume;
+                localStorage.setItem('playerVol', audio.volume); // 🔥 Added save!
                 break;
             case 'arrowdown':
                 e.preventDefault();
                 audio.volume = Math.max(0, audio.volume - 0.05);
                 showToast(`Volume: ${Math.round(audio.volume * 100)}%`);
                 if (volSlider) volSlider.value = audio.volume;
+                localStorage.setItem('playerVol', audio.volume); // 🔥 Added save!
                 break;
             case 'm':
                 e.preventDefault();
