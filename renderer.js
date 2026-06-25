@@ -278,7 +278,7 @@
     }, 500);
 
     // ==========================================
-    // --- EXTERNAL FILE HANDLER ---
+    // --- EXTERNAL FILE HANDLER & AUTO-UPDATER ---
     // ==========================================
     ipcRenderer.on('open-external-file', (event, filePath) => {
         const baseName = path.basename(filePath, '.mp3');
@@ -287,6 +287,15 @@
         if (dashIndex !== -1) { artist = baseName.substring(0, dashIndex).trim(); title = baseName.substring(dashIndex + 1).trim(); }
         queue.push({ t: title, a: artist, p: filePath });
         draw(); saveState(); play(queue.length - 1);
+    });
+
+    // 🔥 NEW: Auto-Updater Toast Notifications
+    ipcRenderer.on('update-status', (event, message) => {
+        if (typeof showToast === 'function') {
+            showToast(`🚀 ${message}`);
+        } else {
+            console.log(message);
+        }
     });
 
     // ==========================================
@@ -423,6 +432,18 @@
                     // If YouTube kills the stream (age-restricted/blocked), automatically search for an alternative!
                     const recoveryKey = s.ytId + '_failed';
                     localAudio.onerror = () => {
+                        // ── GLOBAL SPIRAL BREAKER: max 3 consecutive stream failures ──
+                        const failCount = parseInt(sessionStorage.getItem('yt_fail_count') || '0') + 1;
+                        sessionStorage.setItem('yt_fail_count', failCount);
+                        
+                        if (failCount > 3) {
+                            sessionStorage.setItem('yt_fail_count', '0'); // reset
+                            console.error("Too many consecutive failures, skipping track.");
+                            if (typeof showToast === 'function') showToast("⚠ Stream issues — skipping track.");
+                            setTimeout(() => { if (typeof advanceQueueToNext === 'function') advanceQueueToNext(); }, 1500);
+                            return;
+                        }
+
                         if (sessionStorage.getItem(recoveryKey)) {
                             console.error("Alternative stream also failed.");
                             if (typeof showToast === 'function') showToast(`❌ All alternative streams blocked.`);
@@ -444,6 +465,7 @@
                     };
 
                     safePlay(s.p);
+                    sessionStorage.setItem('yt_fail_count', '0');
                 };
 
                 // Connect to our dynamic streaming server
