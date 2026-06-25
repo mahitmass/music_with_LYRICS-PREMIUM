@@ -1,4 +1,5 @@
 const { app, BrowserWindow, powerSaveBlocker, globalShortcut, ipcMain, session } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -44,46 +45,76 @@ function downloadAudioToTemp(audioPath) {
 }
 
 // ==========================================
-// --- YT-DLP BULLETPROOF STREAM SERVER ---
+// --- YT-DLP CACHED STREAM SERVER (CORS SAFE) --
 // ==========================================
 let ytStreamPort = 0;
 
 function startYTStreamServer() {
+    const urlCache = new Map(); // ytId → { url, expiresAt }
+    const CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
+    let activeYtdlpCalls = 0;
+    const MAX_CONCURRENT_YTDLP = 2; // Prevents the death spiral
+
     const server = http.createServer(async (req, res) => {
         const ytId = decodeURIComponent(req.url.slice(1));
         if (!ytId) { res.writeHead(400); res.end(); return; }
 
         try {
-            // yt-dlp resolves the real CDN URL — much more reliable
-            const rawUrl = await youtubeDl(`https://www.youtube.com/watch?v=${ytId}`, {
-                format: 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
-                getUrl: true,
-                noWarnings: true,
-                noCheckCertificates: true,
-            });
+            let audioUrl = null;
+            const cached = urlCache.get(ytId);
 
-            const audioUrl = (rawUrl || '').trim().split('\n')[0];
+            // ── 1. CHECK CACHE FIRST ──
+            if (cached && cached.expiresAt > Date.now()) {
+                audioUrl = cached.url;
+            } else {
+                // ── 2. CONCURRENCY GUARD ──
+                if (activeYtdlpCalls >= MAX_CONCURRENT_YTDLP) {
+                    console.warn(`[YT Stream] Too busy, rejecting ${ytId}`);
+                    if (!res.headersSent) res.writeHead(503);
+                    res.end();
+                    return;
+                }
+
+                activeYtdlpCalls++;
+                try {
+                    const rawUrl = await youtubeDl(`https://www.youtube.com/watch?v=${ytId}`, {
+                        format: 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
+                        getUrl: true,
+                        noWarnings: true,
+                        noCheckCertificates: true,
+                    });
+                    audioUrl = (rawUrl || '').trim().split('\n')[0];
+                    if (audioUrl) {
+                        urlCache.set(ytId, { url: audioUrl, expiresAt: Date.now() + CACHE_TTL });
+                        console.log(`[YT Stream OK] ${ytId} — cached for 4hrs`);
+                    }
+                } finally {
+                    activeYtdlpCalls--;
+                }
+            }
+
             if (!audioUrl || !audioUrl.startsWith('http')) throw new Error('No URL returned');
 
+            // ── 3. PROXY THE STREAM (Fixes the CORS Visualizer Bug!) ──
             const urlObj = new URL(audioUrl);
             const lib = urlObj.protocol === 'https:' ? https : http;
-
-            // Forward range header so seeking works
+            
             const reqHeaders = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': 'https://www.youtube.com/',
-                'Origin': 'https://www.youtube.com',
+                'Origin': 'https://www.youtube.com'
             };
-            if (req.headers['range']) reqHeaders['Range'] = req.headers['range'];
+            if (req.headers['range']) reqHeaders['Range'] = req.headers['range']; // Allows skipping/seeking
 
             lib.get({
                 hostname: urlObj.hostname,
                 path: urlObj.pathname + urlObj.search,
                 headers: reqHeaders
             }, (proxyRes) => {
+                // Attach CORS headers so Web Audio API (Visualizer) doesn't output zeroes
                 const resHeaders = {
                     'Content-Type': proxyRes.headers['content-type'] || 'audio/webm',
-                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Origin': '*', 
                     'Accept-Ranges': 'bytes',
                 };
                 if (proxyRes.headers['content-length']) resHeaders['Content-Length'] = proxyRes.headers['content-length'];
@@ -298,6 +329,21 @@ ipcMain.handle('get-yt-playlist-ytdlp', async (event, playlistId) => {
       webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }
     });
 
+    // AUTO UPDATER
+    autoUpdater.checkForUpdatesAndNotify();
+
+    autoUpdater.on('update-available', () => {
+        win.webContents.send('update-status', 'Downloading new update...');
+    });
+
+    autoUpdater.on('update-downloaded', () => {
+        win.webContents.send('update-status', 'Update ready! Restarting in 5 seconds...');
+        setTimeout(() => {
+            autoUpdater.quitAndInstall();
+        }, 5000);
+    });
+
+    // LOAD THE UI
     win.loadFile('index.html');
     powerSaveBlocker.start('prevent-app-suspension'); 
 
@@ -318,8 +364,9 @@ ipcMain.handle('get-yt-playlist-ytdlp', async (event, playlistId) => {
     globalShortcut.register('MediaPlayPause', () => { if(win) win.webContents.executeJavaScript('if(typeof togglePlay === "function") togglePlay();'); });
     globalShortcut.register('MediaNextTrack', () => { if(win) win.webContents.executeJavaScript('if(typeof playNext === "function") playNext();'); });
     globalShortcut.register('MediaPreviousTrack', () => { if(win) win.webContents.executeJavaScript('if(typeof playPrev === "function") playPrev();'); });
-  });
-}
+    
+  }); // <-- THIS is where app.whenReady() actually closes!
+} // <-- THIS is where the else block closes!
 
 app.on('will-quit', () => globalShortcut.unregisterAll());
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
