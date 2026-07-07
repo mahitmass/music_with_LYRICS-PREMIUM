@@ -40,6 +40,9 @@
     let isCircuitBreakerActive = false;
     let lastPreloadedIdx = -1;
     let swipeCooldown = false;
+    let offlineSavedTime = 0;
+    let isWaitingForNetwork = false;
+    let wasPlayingBeforeOffline = false;
 
     // ==========================================
     // --- API CONFIG ---
@@ -363,6 +366,14 @@
         const playAttempt = safePlay(song.p);
         if (!playAttempt) { audio.dispatchEvent(new Event('error')); return; }
         audio.onerror = async () => {
+            if (!navigator.onLine) {
+                console.warn("Saavn Audio failed because Wi-Fi disconnected. Blocking skip.");
+                isWaitingForNetwork = true;
+                offlineSavedTime = audio.currentTime;
+                wasPlayingBeforeOffline = true;
+                if (typeof showToast === 'function') showToast("📡 Offline. Waiting for connection...");
+                return; // <--- EXIT IMMEDIATELY, DO NOT SKIP!
+            }
             if (isCircuitBreakerActive) return;
             console.log("Stream failed, Retrying... Attempt:", attempt + 1);
             try {
@@ -372,7 +383,9 @@
                 let newSong = pickBestApiMatch(results, song.t, song.a);
                 let newUrl = getWorkingUrl(newSong?.downloadUrl);
                 if (newUrl) {
-                    song.p = newUrl; saveState();
+                    song.p = newUrl; 
+                    song.isJioSaavnFallback = true; // 🔥 Mark as a bad fallback
+                    // We REMOVED saveState() here so it doesn't remember this URL!
                     tryPlayWithRetry(song, attempt + 1);
                 } else { throw new Error("No URL found in fallback"); }
             } catch (e) {
@@ -389,6 +402,11 @@
 
     function play(i) {
         if (i < 0 || i >= queue.length) return;
+        if (queue[i].isJioSaavnFallback) {
+            queue[i].p = '';
+            queue[i].needsAudioStream = true;
+            queue[i].isJioSaavnFallback = false;
+        }
         const nextSong = queue[i];
         if (typeof currentListenSession !== 'undefined' && currentListenSession && currentListenSession.key !== getSongModelKey(nextSong)) {
             if (typeof finalizeListeningSession === 'function') finalizeListeningSession('switch');
@@ -439,6 +457,14 @@
                     // If YouTube kills the stream (age-restricted/blocked), automatically search for an alternative!
                     const recoveryKey = s.ytId + '_failed';
                     localAudio.onerror = () => {
+                        if (!navigator.onLine) {
+                            console.warn("YouTube stream failed because Wi-Fi disconnected. Blocking skip.");
+                            isWaitingForNetwork = true;
+                            offlineSavedTime = localAudio.currentTime;
+                            wasPlayingBeforeOffline = true;
+                            if (typeof showToast === 'function') showToast("📡 Offline. Waiting for connection...");
+                            return; // <--- EXIT IMMEDIATELY, DO NOT SKIP!
+                        }
                         // ── GLOBAL SPIRAL BREAKER: max 3 consecutive stream failures ──
                         const failCount = parseInt(sessionStorage.getItem('yt_fail_count') || '0') + 1;
                         sessionStorage.setItem('yt_fail_count', failCount);
@@ -606,13 +632,14 @@
                         if (url) {
                             s.p = url;
                             s.needsAudioStream = false;
+                            s.isJioSaavnFallback = true; // 🔥 Mark as a bad fallback
                             if (!s.cover && best?.image?.length > 0) {
                                 s.cover = best.image[best.image.length - 1].url;
                                 const coverEl = document.getElementById('album-cover');
                                 if (coverEl) { coverEl.src = s.cover; coverEl.style.display = 'block'; }
                                 document.getElementById('bg-blur').style.backgroundImage = `url(${s.cover})`;
                             }
-                            saveState();
+                            // We REMOVED saveState() here so it doesn't remember this URL!
                             safePlay(s.p);
                             if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
                             if (typeof getLyrics === 'function') getLyrics(s);
@@ -713,6 +740,41 @@
             }
         }
     };
+
+    // ==========================================
+    // --- WI-FI NETWORK CALLBACK HANDLERS ---
+    // ==========================================
+    window.addEventListener('offline', () => {
+        const s = typeof queue !== 'undefined' ? queue[curIdx] : null;
+        if (s && s.isOnline) {
+            isWaitingForNetwork = true;
+            offlineSavedTime = audio.currentTime;
+            wasPlayingBeforeOffline = !audio.paused;
+            audio.pause();
+            if (typeof showToast === 'function') showToast("📡 Wi-Fi disconnected. Playback paused.");
+        }
+    });
+
+    window.addEventListener('online', () => {
+        if (isWaitingForNetwork && queue[curIdx]) {
+            isWaitingForNetwork = false;
+            if (typeof showToast === 'function') showToast("🌍 Internet restored! Reconnecting stream...");
+            
+            // Wait for the new audio stream to buffer, then jump to the exact saved timestamp
+            const onAudioReady = () => {
+                audio.currentTime = offlineSavedTime;
+                if (wasPlayingBeforeOffline) {
+                    let playPromise = audio.play();
+                    if (playPromise !== undefined) playPromise.catch(() => {});
+                }
+                audio.removeEventListener('canplay', onAudioReady);
+            };
+            audio.addEventListener('canplay', onAudioReady);
+            
+            // Force reload the current track to get a fresh connection
+            play(curIdx);
+        }
+    });
 
     document.getElementById('pb').onclick = (e) => {
         if (audio.duration && isFinite(audio.duration)) {
@@ -849,10 +911,7 @@
         searchTimeout = setTimeout(() => fetchOnlineSearch(query, `${targetId}-online`), 800);
     }
 
-    // Add these two lines right above the function to initialize the native scraper
-    const YTMusicSearch = require('ytmusic-api');
-    const ytGlobalApi = new YTMusicSearch();
-    let isGlobalApiReady = false;
+    
 
     async function fetchOnlineSearch(query, containerId) {
         const container = document.getElementById(containerId);
@@ -865,13 +924,10 @@
         // 1. FETCH & RENDER YOUTUBE MUSIC (NATIVE SCRAPER - NO LIMITS - RED)
         // ==========================================
         try {
-            if (!isGlobalApiReady) {
-                await ytGlobalApi.initialize();
-                isGlobalApiReady = true;
-            }
-
             const enhancedQuery = query.toLowerCase().includes('song') ? query : query + ' song';
-            const ytResults = await ytGlobalApi.searchSongs(enhancedQuery);
+            
+            // 🔥 Use the new Backend IPC! This fixes all the red console errors!
+            const ytResults = await ipcRenderer.invoke('search-yt-music', enhancedQuery);
             
             if (ytResults && ytResults.length > 0) {
                 ytResults.slice(0, 8).forEach(song => {

@@ -832,5 +832,18 @@ body.lock-hover-queue #hover-q {
     right: 0 !important;
 }
 
+.pl-actions.search-open .pl-secondary-btn {
+    display: none;
+}
+
+#pl-search-wrap.search-open input {
+    width: 160px;
+    padding: 0 4px 0 8px;
+}
+
+#pl-search-wrap.search-open {
+    padding: 4px 12px;
+}
+
 
 /*yo*/

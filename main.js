@@ -210,6 +210,18 @@ ipcMain.handle('get-yt-playlist-ytdlp', async (event, playlistId) => {
         return null;
     }
 });
+// ── 3. YT Music Global Search (Moved to backend to fix RED header errors) ──
+ipcMain.handle('search-yt-music', async (event, query) => {
+    try {
+        const YTMusic = require('ytmusic-api');
+        const ytmusic = new YTMusic();
+        await ytmusic.initialize();
+        return await ytmusic.searchSongs(query);
+    } catch (e) {
+        console.error('ytmusic-api search failed:', e.message);
+        return [];
+    }
+});
 
     // ==========================================
     // --- TASK 2: NATIVE C++ AI TRANSCRIPTION ---

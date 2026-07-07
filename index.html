@@ -126,10 +126,18 @@
             <div class="pl-info">
                 <h1 id="pl-detail-title">Loading Playlist...</h1>
                 <p>YouTube Music Sync • <span id="pl-track-count">0</span> tracks</p>
-                <div class="pl-actions">
-                    <button class="yt-btn-primary" onclick="playEntirePlaylist()"><span class="material-icons-round">play_arrow</span> Play All</button>
-                    <button class="yt-btn-secondary" onclick="shuffleEntirePlaylist()"><span class="material-icons-round">shuffle</span> Shuffle</button>
-                </div>
+                <div class="pl-actions" id="pl-actions" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                  <button class="yt-btn-primary" onclick="playEntirePlaylist()"><span class="material-icons-round">play_arrow</span> Play All</button>
+                  <button class="yt-btn-secondary pl-secondary-btn" onclick="shuffleEntirePlaylist()"><span class="material-icons-round">shuffle</span> Shuffle</button>
+
+                  <button class="yt-btn-secondary pl-secondary-btn" onclick="if(currentLoadedPlaylist.length > 0) addYTPlaylistToQueue(document.querySelector('.playlist-link.active')?.getAttribute('data-id') || 'temp', document.getElementById('pl-detail-title').innerText, 'next')"><span class="material-icons-round">queue_play_next</span> Play Next</button>
+
+                  <div id="pl-search-wrap" style="display: inline-flex; align-items: center; margin-left: auto; background: rgba(255,255,255,0.1); border-radius: 20px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.1); transition: padding 0.3s ease;">
+                      <span class="material-icons-round" style="color: var(--dim); cursor: pointer; font-size: 18px; flex-shrink: 0;" onclick="togglePlaylistSearch(event)">search</span>
+                      <input type="text" id="local-playlist-search" placeholder="Find in playlist..."
+                            style="background: transparent; border: none; color: white; outline: none; width: 0px; transition: width 0.3s ease; padding: 0; font-size: 0.85rem;">
+                  </div>
+              </div>
             </div>
         </div>
         <div class="tracklist-container" id="playlist-tracklist">

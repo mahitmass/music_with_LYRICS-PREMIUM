@@ -216,21 +216,60 @@ async function openPlaylist(playlistId, titleName) {
     let html = '';
     currentLoadedPlaylist.forEach((song, i) => {
         const encodedSong = encodeURIComponent(JSON.stringify(song));
+        const coverUrl = song.cover || 'https://via.placeholder.com/40';
+
         html += `
-        <div class="track-row"
+        <div class="track-row playlist-track-item"
              data-type="history-item"
              data-song="${encodedSong}"
              onclick="playFromPlaylist(${i})"
-             oncontextmenu="event.preventDefault()">
-            <div class="track-num">${i + 1}</div>
-            <div style="display:flex; flex-direction:column; overflow:hidden;">
-                <span style="color:white; font-weight:bold; white-space:nowrap; text-overflow:ellipsis;">${song.t}</span>
-                <span style="color:var(--dim); font-size:0.85rem; white-space:nowrap; text-overflow:ellipsis;">${song.a}</span>
+             oncontextmenu="event.preventDefault()"
+             style="display: flex; align-items: center; padding: 10px 15px; border-radius: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer; transition: background 0.2s;">
+            
+            <div class="track-num" style="width: 35px; color: var(--dim); text-align: center; font-size: 0.9rem; flex-shrink: 0;">${i + 1}</div>
+            
+            <img class="lazy-playlist-cover" 
+                 src="data:image/gif;base64,R0lGODlhAQABAIAAAMLCwgAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw==" 
+                 data-src="${coverUrl}" 
+                 style="width: 42px; height: 42px; min-width: 42px; border-radius: 6px; object-fit: cover; margin: 0 15px; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.4);">
+            
+            <div style="display:flex; flex-direction:column; overflow:hidden; flex-grow: 1; padding-right: 15px;">
+                <span style="color:white; font-weight:bold; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; font-size: 1rem;">${song.t}</span>
+                <span style="color:var(--dim); font-size:0.85rem; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; margin-top: 2px;">${song.a}</span>
             </div>
-            <span class="material-icons-round" style="color:var(--dim); font-size:18px;" onclick="event.stopPropagation(); toggleMenu()">more_horiz</span>
+            
+            <span class="material-icons-round" style="color:var(--dim); font-size:20px; flex-shrink: 0;" onclick="event.stopPropagation(); toggleMenu()">more_horiz</span>
         </div>`;
     });
     tracklistEl.innerHTML = html;
+
+    // 🔥 INITIALIZE THE LAZY LOADER ENGINE
+    if (!window.playlistImageObserver) {
+        window.playlistImageObserver = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const img = entry.target;
+                    const realSrc = img.getAttribute('data-src');
+                    if (realSrc) {
+                        img.src = realSrc;
+                        img.removeAttribute('data-src');
+                    }
+                    observer.unobserve(img); 
+                }
+            });
+        }, {
+            root: null, 
+            rootMargin: '0px 0px 1500px 0px', // Loads ~25 songs ahead
+            threshold: 0
+        });
+    }
+
+    // Tell the engine to watch the new images
+    const lazyImages = tracklistEl.querySelectorAll('.lazy-playlist-cover');
+    lazyImages.forEach(img => {
+        window.playlistImageObserver.observe(img);
+    });
+
     return currentLoadedPlaylist;
 }
 
@@ -746,4 +785,41 @@ window.addYTPlaylistToQueue = async function(playlistId, playlistTitleOrPosition
     draw();
     saveState();
 };
+
+// ==========================================
+// --- LOCAL PLAYLIST SEARCH FILTER ---
+// ==========================================
+window.togglePlaylistSearch = function() {
+    const searchInput = document.getElementById('local-playlist-search');
+    if (!searchInput) return;
+    
+    if (searchInput.style.width === '0px' || !searchInput.style.width) {
+        searchInput.style.width = '150px';
+        searchInput.style.paddingLeft = '8px';
+        searchInput.focus();
+    } else {
+        searchInput.style.width = '0px';
+        searchInput.style.paddingLeft = '0px';
+        searchInput.value = ''; 
+        filterPlaylistTracks(''); 
+    }
+};
+
+document.addEventListener('input', (e) => {
+    if (e.target.id === 'local-playlist-search') {
+        filterPlaylistTracks(e.target.value.toLowerCase());
+    }
+});
+
+function filterPlaylistTracks(query) {
+    const trackRows = document.querySelectorAll('.playlist-track-item'); 
+    trackRows.forEach(row => {
+        const textContent = row.innerText.toLowerCase(); 
+        if (textContent.includes(query)) {
+            row.style.display = 'flex'; 
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
 //yo
