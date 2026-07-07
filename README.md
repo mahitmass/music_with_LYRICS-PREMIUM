@@ -23,8 +23,7 @@ Most modern players are either too heavy, hide synced lyrics behind a subscripti
 #### **Option 2: Run from Source (For Developers)**
 1.  **Clone the repository**:
     ```powershell
-    git clone [https://github.com/mahitmass/music_with_LYRICS-PREMIUM.git](https://github.com/mahitmass/music_with_LYRICS-PREMIUM.git)
-    cd music_with_LYRICS-PREMIUM
+    git clone https://github.com/mahitmass/music_with_LYRICS-PREMIUM.git; cd music_with_LYRICS-PREMIUM
     ```
 2.  **Install Dependencies**:
     ```powershell
