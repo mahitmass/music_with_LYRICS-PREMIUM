@@ -832,17 +832,69 @@ body.lock-hover-queue #hover-q {
     right: 0 !important;
 }
 
+/* =========================================
+   🔥 PLAYLIST ACTIONS & SEARCH ANIMATION
+   ========================================= */
+.pl-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap; /* Prevents it from dropping to a new line */
+    overflow: hidden; 
+}
+
+/* Make the secondary buttons animate smoothly */
+.pl-secondary-btn {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+/* When search opens, hide Shuffle and Play Next smoothly */
 .pl-actions.search-open .pl-secondary-btn {
-    display: none;
+    width: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin: 0 !important;
+    opacity: 0;
+    border: none !important;
 }
 
-#pl-search-wrap.search-open input {
-    width: 160px;
-    padding: 0 4px 0 8px;
+/* Search Wrapper Initial State (Just an icon) */
+#pl-search-wrap {
+    display: inline-flex;
+    align-items: center;
+    margin-left: auto; /* Pins it to the right side */
+    border-radius: 20px;
+    padding: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Search Wrapper Open State (Pill shape) */
 #pl-search-wrap.search-open {
-    padding: 4px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 6px 12px 6px 8px;
+}
+
+/* Input Initial State (Hidden) */
+#local-playlist-search {
+    background: transparent;
+    border: none;
+    color: white;
+    outline: none;
+    width: 0px;
+    padding: 0;
+    font-size: 0.85rem;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Input Open State (Expands to the left because of margin-left: auto) */
+#pl-search-wrap.search-open #local-playlist-search {
+    width: 180px; 
+    padding: 0 4px 0 8px;
 }
 
 

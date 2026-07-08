@@ -1,6 +1,6 @@
 {
   "name": "music-player-mass",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "A premium local MP3 player with synced lyrics.",
   "author": "Your Name",
   "main": "main.js",

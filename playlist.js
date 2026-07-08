@@ -125,92 +125,111 @@ async function preloadSidebarPlaylistNames() {
     }
 }
 
+// ==========================================
+// --- FETCH + OPEN YOUTUBE PLAYLIST ---
+// ==========================================
 async function openPlaylist(playlistId, titleName) {
     lockPlaylistSection();
     document.body.classList.remove('player-mode');
     switchView('playlist');
-    document.getElementById('pl-detail-title').innerText = titleName;
+    
+    const titleEl = document.getElementById('pl-detail-title');
     const tracklistEl = document.getElementById('playlist-tracklist');
-    tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);"><span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Scraping tracks from YouTube...</div>`;
+    
+    if (titleEl) titleEl.innerText = titleName;
+    tracklistEl.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--dim);"><span class="material-icons-round" style="animation: spin 1s linear infinite;">sync</span> Loading...</div>`;
 
     let playlistData = null;
+    let hasRenderedFromCache = false;
 
-    // ── CACHE CHECK: load instantly if scraped before (expires 6hrs) ──
+    // ── STEP 1: INSTANT CACHE RENDER ──
     const _cacheKey = `yt-pl-cache-${playlistId}`;
     try {
         const _cached = JSON.parse(localStorage.getItem(_cacheKey));
-        if (_cached && _cached.songs && _cached.songs.length > 0
-            && (Date.now() - (_cached.cachedAt || 0)) < 6 * 60 * 60 * 1000) {
-            console.log(`[Cache HIT] ${playlistId} — ${_cached.songs.length} songs`);
+        if (_cached && _cached.songs && _cached.songs.length > 0) {
+            console.log(`[Cache HIT] Rendering instantly: ${playlistId} — ${_cached.songs.length} songs`);
             playlistData = _cached;
+            renderPlaylistUI(playlistData, titleName);
+            hasRenderedFromCache = true;
+            
+            // Show a tiny silent sync indicator instead of the main loading spinner
+            if (titleEl) titleEl.innerHTML = `${titleName} <span class="material-icons-round" style="font-size: 16px; color: var(--dim); animation: spin 2s linear infinite; vertical-align: middle;" title="Syncing in background...">sync</span>`;
         }
     } catch(e) {}
 
-    // ATTEMPT 1: Try Native YT Music IPC Scraper
+    // ── STEP 2: BACKGROUND SYNC (Always fetch fresh data) ──
     try {
-        playlistData = await ipcRenderer.invoke('get-yt-playlist', playlistId);
-    } catch (e) {
-        console.warn("IPC Playlist Fetch Error, preparing fallback...");
-    }
-
-    // ATTEMPT 2: yt-dlp via IPC — replaces unreliable proxies and official API limits
-    if (!playlistData || !playlistData.songs || playlistData.songs.length === 0) {
-        console.log("ytmusic-api failed. Falling back to native yt-dlp...");
-        tracklistEl.innerHTML = `<div style="padding:40px;text-align:center;color:var(--dim);">
-            <span class="material-icons-round" style="animation:spin 1s linear infinite;">sync</span>
-            Fetching via yt-dlp fallback...
-        </div>`;
+        let freshData = await ipcRenderer.invoke('get-yt-playlist', playlistId);
         
-        try {
-            playlistData = await ipcRenderer.invoke('get-yt-playlist-ytdlp', playlistId);
-        } catch (e) {
-            console.warn('yt-dlp IPC fallback failed:', e);
+        // Fallback to yt-dlp if native fails
+        if (!freshData || !freshData.songs || freshData.songs.length === 0) {
+            freshData = await ipcRenderer.invoke('get-yt-playlist-ytdlp', playlistId);
+        }
+
+        if (freshData && freshData.songs && freshData.songs.length > 0) {
+            const resolvedName = freshData.name || freshData.title || titleName || "YouTube Playlist";
+            
+            // ── STEP 3: COMPARE & UPDATE ──
+            // Only re-render if the track count changed (e.g., songs added/removed) 
+            // or if we never rendered from cache in the first place
+            if (!hasRenderedFromCache || freshData.songs.length !== playlistData.songs.length) {
+                console.log(`[Sync Complete] Playlist updated! Old: ${playlistData?.songs?.length || 0}, New: ${freshData.songs.length}`);
+                
+                // Save fresh data to cache
+                localStorage.setItem(_cacheKey, JSON.stringify({
+                    name: resolvedName, title: resolvedName,
+                    songs: freshData.songs,
+                    cachedAt: Date.now()
+                }));
+                
+                // Update the UI with the new tracks
+                renderPlaylistUI(freshData, resolvedName);
+                if (typeof showToast === 'function' && hasRenderedFromCache) showToast("🔄 Playlist synced with latest changes!");
+            } else {
+                // Same track count, just remove the tiny spinning sync icon
+                if (titleEl) titleEl.innerText = resolvedName;
+            }
+        } else if (!hasRenderedFromCache) {
+            // Both fetches failed and we have no cache
+            tracklistEl.innerHTML = `<div style="color: #ff4c4c; padding: 20px; text-align: center; font-weight: bold;">Failed to load. Is the playlist private, or did YouTube block access?</div>`;
+        }
+    } catch (e) {
+        if (!hasRenderedFromCache) {
+            tracklistEl.innerHTML = `<div style="color: #ff4c4c; padding: 20px; text-align: center;">Network Error while fetching playlist.</div>`;
+        } else {
+            // Failed in background, but user already has cached view, so just remove the spinner
+            if (titleEl) titleEl.innerText = playlistData.name || playlistData.title || titleName;
         }
     }
 
-    // FINAL CHECK: Did both methods fail?
-    if (!playlistData || !playlistData.songs || playlistData.songs.length === 0) {
-        if (typeof showToast === 'function') showToast("❌ YouTube blocked the request or playlist is private.");
-        tracklistEl.innerHTML = `<div style="color: #ff4c4c; padding: 20px; text-align: center; font-weight: bold;">Failed to load. Is the playlist private, or did YouTube block access?</div>`;
-        return[];
-    }
+    return currentLoadedPlaylist;
+}
+
+// ── EXTRACTED HELPER FUNCTION (Add this right below openPlaylist) ──
+function renderPlaylistUI(playlistData, titleName) {
+    const titleEl = document.getElementById('pl-detail-title');
+    const tracklistEl = document.getElementById('playlist-tracklist');
+    const countEl = document.getElementById('pl-track-count');
 
     const resolvedName = playlistData.name || playlistData.title || titleName || "YouTube Playlist";
-
-
-    // ── CACHE WRITE: save so next open is instant ──
-    try {
-        localStorage.setItem(`yt-pl-cache-${playlistId}`, JSON.stringify({
-            name: resolvedName, title: resolvedName,
-            songs: playlistData.songs,
-            cachedAt: Date.now()
-        }));
-    } catch(e) {}
-    const titleEl = document.getElementById('pl-detail-title');
     if (titleEl) titleEl.innerText = resolvedName;
-
-    document.getElementById('pl-track-count').innerText = playlistData.songs.length;
+    if (countEl) countEl.innerText = playlistData.songs.length;
 
     currentLoadedPlaylist = playlistData.songs.map(song => {
         let rawCover = song.thumbnails && song.thumbnails.length > 0 ? song.thumbnails[song.thumbnails.length - 1].url : '';
         let safeCover = rawCover.startsWith('http') ? rawCover : 'https://via.placeholder.com/230';
         let safeArtist = song.artists ? song.artists.map(a => a.name).join(', ') : 'Unknown';
         let cleanTitle = typeof smartCleanTitle === 'function' ? smartCleanTitle(song.name, safeArtist) : song.name;
+        
         return {
-            t: cleanTitle,
-            rawTitle: song.name,
-            a: safeArtist,
-            p: '',
-            cover: safeCover,
-            isOnline: true,
-            needsAudioStream: true,
-            ytId: song.ytId,
-            isYTPlaylist: true
+            t: cleanTitle, rawTitle: song.name, a: safeArtist, p: '', cover: safeCover,
+            isOnline: true, needsAudioStream: true, ytId: song.ytId, isYTPlaylist: true
         };
     });
 
     if (currentLoadedPlaylist.length > 0 && currentLoadedPlaylist[0].cover) {
-        document.getElementById('pl-detail-img').src = currentLoadedPlaylist[0].cover;
+        const detailImg = document.getElementById('pl-detail-img');
+        if (detailImg) detailImg.src = currentLoadedPlaylist[0].cover;
     }
 
     let html = '';
@@ -243,34 +262,22 @@ async function openPlaylist(playlistId, titleName) {
     });
     tracklistEl.innerHTML = html;
 
-    // 🔥 INITIALIZE THE LAZY LOADER ENGINE
+    // Initialize Lazy Loader
     if (!window.playlistImageObserver) {
         window.playlistImageObserver = new IntersectionObserver((entries, observer) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     const img = entry.target;
                     const realSrc = img.getAttribute('data-src');
-                    if (realSrc) {
-                        img.src = realSrc;
-                        img.removeAttribute('data-src');
-                    }
+                    if (realSrc) { img.src = realSrc; img.removeAttribute('data-src'); }
                     observer.unobserve(img); 
                 }
             });
-        }, {
-            root: null, 
-            rootMargin: '0px 0px 1500px 0px', // Loads ~25 songs ahead
-            threshold: 0
-        });
+        }, { root: null, rootMargin: '0px 0px 1500px 0px', threshold: 0 });
     }
 
-    // Tell the engine to watch the new images
     const lazyImages = tracklistEl.querySelectorAll('.lazy-playlist-cover');
-    lazyImages.forEach(img => {
-        window.playlistImageObserver.observe(img);
-    });
-
-    return currentLoadedPlaylist;
+    lazyImages.forEach(img => window.playlistImageObserver.observe(img));
 }
 
 function playFromPlaylist(index) {
@@ -463,7 +470,7 @@ function smartCleanTitle(rawTitle, rawArtist) {
     let title = rawTitle;
     title = title.replace(/\[.*?\]|\(.*?\)/g, ' ');
     title = title.replace(/\b(official|video|audio|lyric|lyrics|remastered|4k|hd|hq|live|cover|remix|ft|feat|featuring|prod|music)\b/ig, ' ');
-    title = title.replace(/[^\w\s\u0900-\u097F]/g, ' ');
+    title = title.replace(/[^\p{L}\p{N}\s]/gu, ' ');
     let mainArtist = rawArtist.split(',')[0].trim();
     if (mainArtist && mainArtist.toLowerCase() !== "unknown artist") {
         let artistParts = mainArtist.split(' ');
@@ -789,19 +796,28 @@ window.addYTPlaylistToQueue = async function(playlistId, playlistTitleOrPosition
 // ==========================================
 // --- LOCAL PLAYLIST SEARCH FILTER ---
 // ==========================================
-window.togglePlaylistSearch = function() {
-    const searchInput = document.getElementById('local-playlist-search');
-    if (!searchInput) return;
+window.togglePlaylistSearch = function(event) {
+    if (event) event.stopPropagation();
     
-    if (searchInput.style.width === '0px' || !searchInput.style.width) {
-        searchInput.style.width = '150px';
-        searchInput.style.paddingLeft = '8px';
+    const actionsContainer = document.getElementById('pl-actions');
+    const searchWrap = document.getElementById('pl-search-wrap');
+    const searchInput = document.getElementById('local-playlist-search');
+    
+    if (!actionsContainer || !searchWrap || !searchInput) return;
+    
+    const isOpen = searchWrap.classList.contains('search-open');
+    
+    if (!isOpen) {
+        // Slide open to the left
+        actionsContainer.classList.add('search-open');
+        searchWrap.classList.add('search-open');
         searchInput.focus();
     } else {
-        searchInput.style.width = '0px';
-        searchInput.style.paddingLeft = '0px';
+        // Slide closed
+        actionsContainer.classList.remove('search-open');
+        searchWrap.classList.remove('search-open');
         searchInput.value = ''; 
-        filterPlaylistTracks(''); 
+        if (typeof filterPlaylistTracks === 'function') filterPlaylistTracks(''); 
     }
 };
 

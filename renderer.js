@@ -118,7 +118,8 @@
         return decodeHtmlText(value)
             .toLowerCase()
             .replace(/[()[\]{}]/g, ' ')
-            .replace(/[^a-z0-9\s]/g, ' ')
+            // 🔥 The 'gu' flag and \p{L} let all foreign languages pass through the search index!
+            .replace(/[^\p{L}\p{N}\s]/gu, ' ') 
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -308,10 +309,58 @@
         }
     });
 
+   // ==========================================
+    // --- VOLUME CONTROL & MUTE ---
     // ==========================================
-    // --- VOLUME CONTROL ---
-    // ==========================================
-    volSlider.oninput = () => { audio.volume = volSlider.value; localStorage.setItem('playerVol', volSlider.value); };
+    let lastUnmutedVolume = 1; // Remembers volume before muting
+
+    // Update icon visually based on volume level
+    function updateVolumeIcon(vol) {
+        const volIcon = document.getElementById('vol-icon');
+        if (!volIcon) return;
+        if (vol === 0) volIcon.innerText = 'volume_off';
+        else if (vol < 0.5) volIcon.innerText = 'volume_down';
+        else volIcon.innerText = 'volume_up';
+    }
+
+    // Handle manual slider drag
+    if (volSlider) {
+        volSlider.oninput = () => { 
+            const newVol = parseFloat(volSlider.value);
+            audio.volume = newVol; 
+            localStorage.setItem('playerVol', newVol); 
+            updateVolumeIcon(newVol);
+            if (newVol > 0) lastUnmutedVolume = newVol; // Track for unmuting later
+        };
+    }
+
+    // Handle clicking the icon to Mute/Unmute
+    window.toggleMute = function() {
+        if (audio.volume > 0) {
+            // Mute it
+            lastUnmutedVolume = audio.volume;
+            audio.volume = 0;
+            if (volSlider) volSlider.value = 0;
+            localStorage.setItem('playerVol', 0);
+            updateVolumeIcon(0);
+        } else {
+            // Unmute it back to where it was
+            const restoreVol = lastUnmutedVolume > 0 ? lastUnmutedVolume : 1; 
+            audio.volume = restoreVol;
+            if (volSlider) volSlider.value = restoreVol;
+            localStorage.setItem('playerVol', restoreVol);
+            updateVolumeIcon(restoreVol);
+        }
+    };
+    
+    // 🔥 Make sure the icon matches the saved volume right when the app boots up!
+    window.addEventListener('load', () => {
+        let savedVol = localStorage.getItem('playerVol');
+        if (savedVol !== null) {
+            updateVolumeIcon(parseFloat(savedVol));
+            if (parseFloat(savedVol) > 0) lastUnmutedVolume = parseFloat(savedVol);
+        }
+    });
 
     // ==========================================
     // --- QUEUE MANAGEMENT ---
@@ -649,6 +698,15 @@
                             setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
                         }
                     } catch (e) {
+                        // 🔥 GATEKEEPER: Stop skipping if the user tries to change songs while offline!
+                        if (!navigator.onLine) {
+                            isWaitingForNetwork = true;
+                            offlineSavedTime = 0; // New song, so start at 0:00 when reconnected
+                            wasPlayingBeforeOffline = true;
+                            if (typeof showToast === 'function') showToast("📡 Offline. Waiting for connection...");
+                            return; // DO NOT SKIP!
+                        }
+
                         showToast(`❌ Stream error: ${s.t}`);
                         setTimeout(() => { if (typeof playNext === 'function') playNext(); }, 2000);
                     }
@@ -747,11 +805,23 @@
     window.addEventListener('offline', () => {
         const s = typeof queue !== 'undefined' ? queue[curIdx] : null;
         if (s && s.isOnline) {
-            isWaitingForNetwork = true;
-            offlineSavedTime = audio.currentTime;
-            wasPlayingBeforeOffline = !audio.paused;
-            audio.pause();
-            if (typeof showToast === 'function') showToast("📡 Wi-Fi disconnected. Playback paused.");
+            // 🔥 We NO LONGER pause here! Just show a toast and let the buffer keep playing.
+            if (typeof showToast === 'function') showToast("📡 Wi-Fi dropped. Playing from cache...");
+        }
+    });
+
+    // 🔥 NEW: Wait until the buffer ACTUALLY runs out before pausing!
+    audio.addEventListener('waiting', () => {
+        if (!navigator.onLine) {
+            const s = typeof queue !== 'undefined' ? queue[curIdx] : null;
+            if (s && s.isOnline && !isWaitingForNetwork) {
+                console.warn("Buffer ran dry while offline. Pausing.");
+                isWaitingForNetwork = true;
+                offlineSavedTime = audio.currentTime;
+                wasPlayingBeforeOffline = true;
+                audio.pause();
+                if (typeof showToast === 'function') showToast("📡 Buffer empty. Waiting for connection...");
+            }
         }
     });
 
@@ -1094,6 +1164,15 @@
                 immResults.style.display = 'none';
             }
         }
+        
+        // 🔥 NEW: Close Playlist Search when clicking outside
+        const plSearchWrap = document.getElementById('pl-search-wrap');
+        if (plSearchWrap && plSearchWrap.classList.contains('search-open')) {
+            // Don't close if they clicked inside the search bar, or if they clicked the magnifying glass itself
+            if (!plSearchWrap.contains(e.target) && e.target.innerText !== 'search') {
+                if (typeof togglePlaylistSearch === 'function') togglePlaylistSearch();
+            }
+        }
     });
 
     if (sideSearch) {
@@ -1209,14 +1288,23 @@
             case 'escape':
                 e.preventDefault();
                 if (document.activeElement) document.activeElement.blur();
+                
                 const sidebarInput = document.getElementById('sidebar-search');
                 const sidebarResults = document.getElementById('sidebar-search-results');
                 if (sidebarInput) sidebarInput.value = '';
                 if (sidebarResults) { sidebarResults.style.display = 'none'; sidebarResults.innerHTML = ''; }
-                const immInput = document.getElementById('imm-search');
+                
+                const immInput2 = document.getElementById('imm-search');
                 const immDrop = document.getElementById('imm-search-results');
-                if (immInput) immInput.value = '';
+                if (immInput2) immInput2.value = '';
                 if (immDrop) { immDrop.style.display = 'none'; immDrop.innerHTML = ''; }
+                
+                // 🔥 NEW: Close Playlist Search on Escape
+                const plSearchWrap = document.getElementById('pl-search-wrap');
+                if (plSearchWrap && plSearchWrap.classList.contains('search-open')) {
+                    if (typeof togglePlaylistSearch === 'function') togglePlaylistSearch();
+                }
+                
                 draw();
                 break;
             case ' ':
