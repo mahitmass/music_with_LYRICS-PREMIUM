@@ -191,7 +191,7 @@ async function getLyrics(s) {
         let cleanTitle = getCleanTitle(s);
         let lDir, lPath;
 
-        // 1. Local Read (Keep using the clean title so your hard drive stays neat)
+        // 1. Local Read
         if (!s.isOnline) {
             lDir = path.join(path.dirname(s.p), 'Lyrics');
             lPath = path.join(lDir, s.a + ' - ' + cleanTitle + '.lrc');
@@ -209,17 +209,12 @@ async function getLyrics(s) {
             return;
         }
 
-        // 🔥 THE FIX: The Waterfall Search Logic
-        const searchTitle = s.apiT || s.rawTitle || cleanTitle;
-        const searchArtist = s.apiA || s.a || '';
-
         lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">Searching the database...</p>';
 
         const headers = { 'User-Agent': 'ProMediaPlayer/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
+
         const durationParam = audio.duration > 0 ? `&duration=${Math.round(audio.duration)}` : '';
-        
-        // Use searchTitle and searchArtist here!
-        let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(searchTitle)}&artist_name=${encodeURIComponent(searchArtist)}${durationParam}`, { headers });
+        let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(s.a || '')}${durationParam}`, { headers });
 
         if (res.status === 429 || res.status === 403) {
             lContent.innerHTML = '<p class="lyric-line" style="opacity:1; color:#ff4c4c;">API Cooldown. Waiting...</p>';
@@ -230,8 +225,7 @@ async function getLyrics(s) {
 
         let data = await res.json();
         if (!data || (!data[0]?.syncedLyrics && !data[0]?.plainLyrics)) {
-            // Fallback search using searchTitle and searchArtist
-            res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(searchArtist + ' ' + searchTitle)}${durationParam}`, { headers });
+            res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent((s.a || '') + ' ' + cleanTitle)}${durationParam}`, { headers });
             if (res.ok) data = await res.json();
         }
 
@@ -254,8 +248,7 @@ async function getLyrics(s) {
             const nativeScriptRegex = /[\u0400-\u04FF\u0370-\u03FF\u0900-\u0DFF\u0600-\u06FF\u3000-\u9FFF\uAC00-\uD7AF]/;
             if (nativeScriptRegex.test(finalLyrics)) {
                 lContent.innerHTML = '<p class="lyric-line" style="opacity: 1; filter: blur(0px);">Searching for Romanized version...</p>';
-                // Use searchTitle here!
-                let romRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(searchTitle + ' romanized')}`, { headers });
+                let romRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' romanized')}`, { headers });
                 if (romRes.ok) {
                     let romData = await romRes.json();
                     if (romData && romData[0]?.syncedLyrics && !nativeScriptRegex.test(romData[0].syncedLyrics)) {
@@ -425,13 +418,8 @@ async function triggerRetryUI() {
     container.innerHTML = `<div style="padding:50px; color:var(--accent); text-align:center; display:flex; gap:15px; align-items:center; justify-content:center"><span class="material-icons-round" style="animation: spin 1s linear infinite; font-size:32px">sync</span>Searching alternative synced lyrics...</div>`;
 
     const s = queue[curIdx];
-    
-    // 🔥 THE FIX: The Waterfall Search Logic for Retry
-    const searchTitle = s.apiT || s.rawTitle || getCleanTitle(s);
-    const searchArtist = s.apiA || s.a || '';
-    
-    const q = `${encodeURIComponent(searchArtist + ' ' + searchTitle)}`;
-    const headers = { 'User-Agent': 'ProMediaPlayer/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
+    const q = `${encodeURIComponent((s.a || '') + ' ' + getCleanTitle(s))}`;
+    const headers = { 'User-Agent': 'music-player-mass/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
 
     const aiRetryButtonHTML = `
         <div class="retry-item" onclick="exitRetryUI(); triggerManualAIGeneration();" style="text-align:center; border: 1px dashed rgba(76,194,255,0.4); background: rgba(76,194,255,0.05); margin-top: 10px;">
