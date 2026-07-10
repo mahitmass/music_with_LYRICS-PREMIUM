@@ -593,12 +593,28 @@ function initRealVisualizer() {
         try {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            // 1. Create the Visualizer Node
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 128;
             analyser.smoothingTimeConstant = 0.7;
+            
+            // 2. Create the Audio Normalizer (Compressor) Node
+            const compressor = audioCtx.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-24, audioCtx.currentTime); 
+            compressor.knee.setValueAtTime(30, audioCtx.currentTime);       
+            compressor.ratio.setValueAtTime(12, audioCtx.currentTime);      
+            compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);  
+            compressor.release.setValueAtTime(0.25, audioCtx.currentTime);  
+
+            // 3. Daisy-chain them! Audio Element -> Compressor -> Analyzer -> Speakers
             mediaSource = audioCtx.createMediaElementSource(audioEl);
-            mediaSource.connect(analyser);
+            mediaSource.connect(compressor);
+            compressor.connect(analyser);
             analyser.connect(audioCtx.destination);
+
+            audioEl.visConnected = true;
+            console.log("🔊 Smart Normalizer & Visualizer chain connected!");
             audioEl.visConnected = true;
             visDataArray = new Uint8Array(analyser.frequencyBinCount);
             canvasLeft = document.getElementById('vis-canvas-left');
@@ -695,14 +711,18 @@ function drawRealWaveform() {
     drawSmoothCurve(ctxRight, pointsRight, false);
 }
 
-// Auto-restart visualizer when audio plays if in cyberpunk mode
+// Auto-restart audio context chain when audio plays
 document.addEventListener('DOMContentLoaded', () => {
     const playerEl = document.getElementById('player');
     if (playerEl) {
         playerEl.addEventListener('playing', () => {
+            // 🔥 ALWAYS initialize the chain so the Normalizer kicks in
+            initRealVisualizer(); 
+            
+            // But ONLY start the heavy drawing loop if we are in Cyberpunk mode
             if (document.body.classList.contains('imm-layout-1')) {
                 isDrawingWaveform = false;
-                initRealVisualizer();
+                drawRealWaveform();
             }
         });
     }

@@ -434,6 +434,11 @@
                 if (newUrl) {
                     song.p = newUrl; 
                     song.isJioSaavnFallback = true; // 🔥 Mark as a bad fallback
+                    
+                    // 🔥 NEW: Save exact API metadata for the lyrics engine
+                    song.apiT = decodeHtmlText(newSong?.name || newSong?.title || '');
+                    song.apiA = getSongArtist(newSong);
+
                     // We REMOVED saveState() here so it doesn't remember this URL!
                     tryPlayWithRetry(song, attempt + 1);
                 } else { throw new Error("No URL found in fallback"); }
@@ -583,11 +588,13 @@
                         
                         if (data.items && data.items.length > 0) {
                             let newId = null;
+                            let accurateItem = null; // 🔥 Track the actual video object
                             
                             // Pick the very first result that we haven't already marked as 'failed'
                             for (let item of data.items) {
                                 if (!sessionStorage.getItem(item.id.videoId + '_failed')) {
                                     newId = item.id.videoId;
+                                    accurateItem = item; // 🔥 Save it
                                     break;
                                 }
                             }
@@ -595,6 +602,11 @@
                             if (newId) {
                                 s.ytId = newId; 
                                 s.isYTPlaylist = false; // Turn off flag to prevent infinite loops
+                                
+                                // 🔥 NEW: Save exact YouTube metadata for the lyrics engine
+                                s.apiT = decodeHtmlText(accurateItem.snippet.title);
+                                s.apiA = decodeHtmlText(accurateItem.snippet.channelTitle);
+
                                 if (typeof saveState === 'function') saveState();
                                 play(curIdx); // Play the newly found alternative video
                             } else {
@@ -682,6 +694,11 @@
                             s.p = url;
                             s.needsAudioStream = false;
                             s.isJioSaavnFallback = true; // 🔥 Mark as a bad fallback
+                            
+                            // 🔥 NEW: Save exact API metadata for the lyrics engine
+                            s.apiT = decodeHtmlText(best?.name || best?.title || '');
+                            s.apiA = getSongArtist(best);
+
                             if (!s.cover && best?.image?.length > 0) {
                                 s.cover = best.image[best.image.length - 1].url;
                                 const coverEl = document.getElementById('album-cover');
@@ -1504,5 +1521,4 @@
             bufferAnimFrame = requestAnimationFrame(animateBufferText);
         }
     });
-
     //yo

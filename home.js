@@ -126,10 +126,7 @@ async function populateSmartCarousel(query, containerId, emergencyQueries) {
     }
 }
 
-// Native Node.js YouTube Music Scraper (Zero API Limits)
-const YTMusic = require('ytmusic-api');
-const ytHomeApi = new YTMusic();
-let isHomeApiReady = false;
+
 
 async function fetchHybridYTData(query) {
     const cacheKey = `shelf_${query.replace(/\s+/g, '')}`;
@@ -137,18 +134,13 @@ async function fetchHybridYTData(query) {
     if (cachedData) return JSON.parse(cachedData);
 
     try {
-        if (!isHomeApiReady) {
-            await ytHomeApi.initialize();
-            isHomeApiReady = true;
-        }
-        
-        // Native scrape! No API keys, no 429 errors!
-        const results = await ytHomeApi.searchSongs(query);
+        // 🔥 THE FIX: Route the search through the secure backend IPC!
+        const results = await require('electron').ipcRenderer.invoke('search-yt-music', query);
         
         if (!results || results.length === 0) return [];
 
         let songs = results.slice(0, 10).map(song => ({
-            t: song.name,
+            t: song.name || 'Unknown',
             a: song.artist?.name || "Unknown Artist",
             ytId: song.videoId,
             cover: song.thumbnails && song.thumbnails.length > 0 ? song.thumbnails[song.thumbnails.length - 1].url : "https://via.placeholder.com/150",
@@ -160,7 +152,7 @@ async function fetchHybridYTData(query) {
         sessionStorage.setItem(cacheKey, JSON.stringify(songs));
         return songs;
     } catch (e) {
-        console.error("Native YT API Failed:", e);
+        console.error("Backend YT API Failed:", e);
         return [];
     }
 }
