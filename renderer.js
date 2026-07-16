@@ -164,6 +164,8 @@
         if (!Array.isArray(results) || results.length === 0) return null;
         const ranked = results
             .filter(song => Array.isArray(song?.downloadUrl) && song.downloadUrl.length > 0)
+            // 🔥 THE FIX: Block clips shorter than 50 seconds!
+            .filter(song => !song.duration || parseInt(song.duration) >= 50)
             .map(song => ({ song, score: scoreApiSongMatch(song, sourceTitle, sourceArtist) }))
             .sort((a, b) => b.score - a.score);
         return ranked[0]?.song || null;
@@ -670,8 +672,20 @@
                                         const artistScore = cleanArtist ? tokenSimilarity(cleanArtist, rArtist) * 60 : 0;
                                         const artistBonus = cleanArtist && rArtist.toLowerCase().includes(cleanArtist.toLowerCase()) ? 20 : 0;
                                         const variantPenalty = (!titleHasVariant && containsVariantTerm(rTitle)) ? 200 : 0;
-                                        return { r, score: titleScore + artistScore + artistBonus - variantPenalty };
+                                        
+                                        // 🔥 INDESTRUCTIBLE TIME FILTER: If duration is missing, penalize it heavily. If under 50s, nuke it.
+                                        let durSecs = parseInt(r.duration || '0');
+                                        let timePenalty = 0;
+                                        if (durSecs > 0 && durSecs < 50) timePenalty = 9999; // Absolute garbage
+                                        if (durSecs === 0) timePenalty = 50; // Probably garbage
+                                        
+                                        return { 
+                                            r, 
+                                            score: titleScore + artistScore + artistBonus - variantPenalty - timePenalty,
+                                            debugInfo: `Title: "${rTitle}" | Dur: ${durSecs}s | BaseScore: ${Math.round(titleScore + artistScore)}`
+                                        };
                                     })
+                                    .filter(item => item.score > 0) // Throw out the 9999 penalized ringtones
                                     .sort((a, b) => {
                                         const scoreDiff = b.score - a.score;
                                         if (Math.abs(scoreDiff) > 15) return scoreDiff;
@@ -683,8 +697,18 @@
                                         return scoreDiff;
                                     });
 
+                                // 🔥 THE DEBUG LOGGER: Print the results to the console!
+                                console.log(`🔍 [JioSaavn Fallback Debug] Searched for: "${q}"`);
+                                console.log(`Found ${scored.length} viable tracks after filtering ringtones.`);
+                                scored.forEach((item, idx) => {
+                                    console.log(`  [#${idx+1}] Score: ${Math.round(item.score)} | ${item.debugInfo}`);
+                                });
+
                                 if (scored.length > 0 && scored[0].score > 45) {
                                     best = scored[0].r;
+                                    console.log(`✅ Selected Best Match: "${decodeHtmlText(best.name)}"`);
+                                } else {
+                                    console.warn(`❌ No tracks passed the 45-point threshold.`);
                                 }
                             } catch (e) { /* try next query */ }
                         }
@@ -966,9 +990,23 @@
                 </div>`;
             }
         });
-        if (!localFound) html += `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No local match</div>`;
+       if (!localFound) html += `<div style="padding:10px; color:var(--dim); text-align:center; font-size: 0.85rem;">No local match</div>`;
 
-        let history = JSON.parse(localStorage.getItem('playHistory') || '[]');
+        // 🔥 THE FIX: Auto-clean duplicate history permanently (Keeps newest play)
+        let rawHistory = JSON.parse(localStorage.getItem('playHistory') || '[]');
+        let history = [];
+        let seenHist = new Set();
+        
+        for (let i = rawHistory.length - 1; i >= 0; i--) {
+            let s = rawHistory[i];
+            const key = ((s.t || '') + "::" + (s.a || '')).toLowerCase();
+            if (!seenHist.has(key)) {
+                seenHist.add(key);
+                history.unshift(s); 
+            }
+        }
+        localStorage.setItem('playHistory', JSON.stringify(history));
+
         let historyMatches = history.filter(s => (s.t || '').toLowerCase().includes(q) || (s.a || '').toLowerCase().includes(q));
         if (historyMatches.length > 0) {
             html += `<div style="padding:15px 10px 5px; color:#b57bff; font-size:0.75rem; font-weight:bold; letter-spacing:1px; text-transform:uppercase; border-top:1px solid #333; margin-top:5px;">From Your History</div>`;

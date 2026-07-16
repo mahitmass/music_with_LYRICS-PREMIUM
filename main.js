@@ -166,62 +166,89 @@ if (!gotTheLock) {
         try { fs.unlinkSync(cookiePath); } catch(e) {}
     }
 
+    // 🔥 GLOBALIZE YT MUSIC: Initialize once to prevent rate-limit crashes
+    const YTMusic = require('ytmusic-api');
+    const globalYtMusic = new YTMusic();
+    let isGlobalYtReady = false;
+
     // ── 1. The YT Music Scraper (Moved to backend to stop red header errors) ──
-ipcMain.handle('get-yt-playlist', async (event, playlistId) => {
-    try {
-        const YTMusic = require('ytmusic-api');
-        const ytmusic = new YTMusic();
-        await ytmusic.initialize();
-        return await ytmusic.getPlaylist(playlistId);
-    } catch (e) {
-        console.warn('ytmusic-api playlist fetch failed:', e.message);
-        return null;
-    }
-});
+    ipcMain.handle('get-yt-playlist', async (event, rawId) => {
+        try {
+            // 🔥 THE BYPASS: Clean the ID. Strip 'VL' prefix that breaks APIs
+            let playlistId = rawId;
+            if (playlistId.startsWith('VL')) playlistId = playlistId.substring(2);
 
-// ── 2. The Bulletproof yt-dlp Fallback (No API Limits) ──
-ipcMain.handle('get-yt-playlist-ytdlp', async (event, playlistId) => {
-    try {
-        // youtubeDl is declared at top of file with ASAR fix already applied
-        const result = await youtubeDl(
-            `https://www.youtube.com/playlist?list=${playlistId}`,
-            {
-                flatPlaylist: true,
-                dumpSingleJson: true,
-                noWarnings: true,
-                noCheckCertificate: true,
+            if (!isGlobalYtReady) {
+                await globalYtMusic.initialize();
+                isGlobalYtReady = true;
             }
-        );
+            return await globalYtMusic.getPlaylist(playlistId);
+        } catch (e) {
+            console.warn('ytmusic-api playlist fetch failed:', e.message);
+            return null;
+        }
+    });
 
-        if (!result || !result.entries) return null;
+    // ── 2. The Bulletproof yt-dlp Fallback (No API Limits) ──
+    ipcMain.handle('get-yt-playlist-ytdlp', async (event, rawId) => {
+        try {
+            // 🔥 THE BYPASS: Clean the ID here too
+            let playlistId = rawId;
+            if (playlistId.startsWith('VL')) playlistId = playlistId.substring(2);
 
-        return {
-            title: result.title,
-            name:  result.title,
-            songs: result.entries.map(entry => ({
-                name:       entry.title,
-                artists:    [{ name: entry.uploader || entry.channel || 'Unknown Artist' }],
-                thumbnails: [{ url: entry.thumbnail || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg` }],
-                ytId: entry.id
-            }))
-        };
-    } catch (e) {
-        console.error('yt-dlp playlist fetch failed:', e.message);
-        return null;
-    }
-});
-// ── 3. YT Music Global Search (Moved to backend to fix RED header errors) ──
-ipcMain.handle('search-yt-music', async (event, query) => {
-    try {
-        const YTMusic = require('ytmusic-api');
-        const ytmusic = new YTMusic();
-        await ytmusic.initialize();
-        return await ytmusic.searchSongs(query);
-    } catch (e) {
-        console.error('ytmusic-api search failed:', e.message);
-        return [];
-    }
-});
+            // youtubeDl is declared at top of file with ASAR fix already applied
+            const result = await youtubeDl(
+                `https://www.youtube.com/playlist?list=${playlistId}`,
+                {
+                    flatPlaylist: true,
+                    dumpSingleJson: true,
+                    noWarnings: true,
+                    noCheckCertificate: true,
+                    ignoreErrors: true,
+                    noCacheDir: true, 
+                }
+            );
+
+            if (!result || !result.entries) return null;
+
+            return {
+                title: result.title,
+                name:  result.title,
+                // Filter out any null entries caused by deleted videos
+                songs: result.entries.filter(entry => entry && entry.title).map(entry => ({
+                    name:       entry.title,
+                    artists:    [{ name: entry.uploader || entry.channel || 'Unknown Artist' }],
+                    thumbnails: [{ url: entry.thumbnail || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg` }],
+                    ytId: entry.id
+                }))
+            };
+        } catch (e) {
+            console.error('yt-dlp playlist fetch failed:', e.message);
+            return null;
+        }
+    });
+
+    // ── 3. YT Music Global Search (Moved to backend to fix RED header errors) ──
+    ipcMain.handle('search-yt-music', async (event, query) => {
+        try {
+            if (!isGlobalYtReady) {
+                await globalYtMusic.initialize();
+                isGlobalYtReady = true;
+            }
+            const results = await globalYtMusic.searchSongs(query);
+            
+            // 🔥 THE FIX: Block YouTube Shorts and snippets! 
+            // ytmusic-api returns duration in seconds. We filter out anything under 50s.
+            return results.filter(song => {
+                if (!song.duration) return true; // Pass it through if duration is hidden
+                return song.duration >= 50; 
+            });
+            
+        } catch (e) {
+            console.error('ytmusic-api search failed:', e.message);
+            return [];
+        }
+    });
 
     // ==========================================
     // --- TASK 2: NATIVE C++ AI TRANSCRIPTION ---
