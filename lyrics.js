@@ -15,7 +15,7 @@
 // 🔥 NEW: Flawless Unique ID generator for lyrics sync & saving
 function getLyricTrackId(s) {
     if (!s) return 'unknown';
-    return s.ytId || s.id || (s.isOnline ? s.t + '::' + s.a : s.p);
+    return s.isOnline ? s.t + '::' + s.a : s.p;
 }
 let aiWorker = null;
 let aiTaskQueue = [];

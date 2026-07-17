@@ -250,7 +250,7 @@
                 const s = queue[curIdx];
                 document.getElementById('cur-t').innerText = s.t;
                 document.getElementById('cur-a').innerText = s.a;
-                currentSongId = s.ytId || (s.a + " - " + s.t);
+                currentSongId = s.isOnline ? s.t + "::" + s.a : s.p;
                 updateToolIcons();
                 if (s.isOnline) {
                     if (!s.ytId) audio.src = s.p;
@@ -480,7 +480,7 @@
         isDrawingWaveform = false;
         if (typeof initRealVisualizer === 'function') initRealVisualizer();
 
-        currentSongId = s.id || s.p;
+        currentSongId = s.isOnline ? s.t + "::" + s.a : s.p;
         if (typeof updateToolIcons === 'function') updateToolIcons();
         draw();
         saveState();
