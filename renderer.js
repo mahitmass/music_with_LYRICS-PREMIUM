@@ -298,8 +298,13 @@
         let artist = "Unknown Artist", title = baseName;
         const dashIndex = baseName.indexOf('-');
         if (dashIndex !== -1) { artist = baseName.substring(0, dashIndex).trim(); title = baseName.substring(dashIndex + 1).trim(); }
-        queue.push({ t: title, a: artist, p: filePath });
-        draw(); saveState(); play(queue.length - 1);
+        if (queue.length === 0) {
+            queue.push({ t: title, a: artist, p: filePath });
+            draw(); saveState(); play(0);
+        } else {
+            queue.splice(curIdx + 1, 0, { t: title, a: artist, p: filePath });
+            draw(); saveState(); play(curIdx + 1);
+        }
     });
 
     // 🔥 NEW: Auto-Updater Toast Notifications
@@ -308,6 +313,15 @@
             showToast(`🚀 ${message}`);
         } else {
             console.log(message);
+        }
+    });
+    
+    // Download progress
+    let lastDownloadToast = 0;
+    ipcRenderer.on('download-progress', (event, percent) => {
+        if (typeof showToast === 'function' && Date.now() - lastDownloadToast > 1000) {
+            showToast(`Downloading: ${percent}%`);
+            lastDownloadToast = Date.now();
         }
     });
 
@@ -567,7 +581,7 @@
                     playYT(ytStreamPort);
                 }
 
-                if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
+                if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a, artwork: s.cover ? [{ src: s.cover, sizes: '512x512', type: 'image/jpeg' }] : [] });
                 if (typeof getLyrics === 'function') getLyrics(s);
                 if (typeof startListeningSession === 'function') startListeningSession(s);
                 return;
@@ -731,7 +745,7 @@
                             }
                             // We REMOVED saveState() here so it doesn't remember this URL!
                             safePlay(s.p);
-                            if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
+                            if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a, artwork: s.cover ? [{ src: s.cover, sizes: '512x512', type: 'image/jpeg' }] : [] });
                             if (typeof getLyrics === 'function') getLyrics(s);
                             if (typeof startListeningSession === 'function') startListeningSession(s);
                         } else {
@@ -761,7 +775,7 @@
             if (typeof extractAlbumArt === 'function') extractAlbumArt(s);
         }
 
-        if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a });
+        if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: s.t, artist: s.a, artwork: s.cover ? [{ src: s.cover, sizes: '512x512', type: 'image/jpeg' }] : [] });
         if (typeof getLyrics === 'function') getLyrics(s);
         if (typeof startListeningSession === 'function') startListeningSession(s);
     }
@@ -887,11 +901,33 @@
         }
     });
 
-    document.getElementById('pb').onclick = (e) => {
+    const pb = document.getElementById('pb');
+    const hoverTime = document.getElementById('hover-time');
+
+    pb.addEventListener('mousemove', (e) => {
+        if (!audio.duration || !isFinite(audio.duration)) return;
+        const rect = pb.getBoundingClientRect();
+        const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+        const pct = offsetX / rect.width;
+        const time = pct * audio.duration;
+        const fmt = s => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+        
+        hoverTime.style.left = `${(pct * 100)}%`;
+        hoverTime.textContent = fmt(time);
+        hoverTime.style.opacity = '1';
+    });
+
+    pb.addEventListener('mouseleave', () => {
+        hoverTime.style.opacity = '0';
+    });
+
+    pb.addEventListener('click', (e) => {
         if (audio.duration && isFinite(audio.duration)) {
-            audio.currentTime = (e.offsetX / e.target.clientWidth) * audio.duration;
+            const rect = pb.getBoundingClientRect();
+            const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+            audio.currentTime = (offsetX / rect.width) * audio.duration;
         }
-    };
+    });
 
     // ==========================================
     // --- MEDIA SESSION (OS INTEGRATION) ---

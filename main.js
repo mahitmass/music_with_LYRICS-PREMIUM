@@ -20,6 +20,80 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 let win;
 const gotTheLock = app.requestSingleInstanceLock();
 
+function fastDownload(urlStr, destPath, isAudio, event) {
+    return new Promise((resolve, reject) => {
+        let totalBytes = 0;
+        let downloaded = 0;
+        const numConnections = 8;
+        const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' };
+
+        const getStreamInfo = (dUrl) => {
+            const lib = dUrl.startsWith('https') ? https : http;
+            const req = lib.get(dUrl, { headers }, (res) => {
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    res.destroy();
+                    return getStreamInfo(new URL(res.headers.location, dUrl).href);
+                }
+                if (res.statusCode >= 400) {
+                    res.destroy();
+                    return reject(new Error('HTTP ' + res.statusCode));
+                }
+                
+                const length = parseInt(res.headers['content-length'], 10) || 0;
+                const acceptRanges = res.headers['accept-ranges'] === 'bytes';
+                
+                if (length < 1024 * 1024 || !acceptRanges) {
+                    totalBytes = length;
+                    const file = fs.createWriteStream(destPath);
+                    res.on('data', c => {
+                        downloaded += c.length;
+                        if (totalBytes && isAudio && event) event.sender.send('download-progress', Math.round((downloaded / totalBytes) * 100));
+                    });
+                    res.pipe(file);
+                    file.on('finish', () => file.close(resolve));
+                } else {
+                    res.destroy();
+                    totalBytes = length;
+                    const chunkSize = Math.ceil(length / numConnections);
+
+                    const fd = fs.openSync(destPath, 'w');
+                    fs.writeSync(fd, Buffer.alloc(1), 0, 1, length - 1);
+                    fs.closeSync(fd);
+
+                    const downloadChunk = (index) => {
+                        return new Promise((resChunk, rejChunk) => {
+                            const start = index * chunkSize;
+                            const end = index === numConnections - 1 ? length - 1 : (start + chunkSize - 1);
+                            const chunkHeaders = { ...headers, 'Range': `bytes=${start}-${end}` };
+                            
+                            lib.get(dUrl, { headers: chunkHeaders }, (resRange) => {
+                                if (resRange.statusCode >= 400) return rejChunk(new Error('Chunk HTTP ' + resRange.statusCode));
+                                
+                                const fileStream = fs.createWriteStream(destPath, { flags: 'r+', start: start });
+                                resRange.on('data', c => {
+                                    downloaded += c.length;
+                                    if (isAudio && event) event.sender.send('download-progress', Math.round((downloaded / totalBytes) * 100));
+                                });
+                                resRange.pipe(fileStream);
+                                fileStream.on('finish', () => fileStream.close(resChunk));
+                            }).on('error', rejChunk);
+                        });
+                    };
+
+                    const promises = [];
+                    for (let i = 0; i < numConnections; i++) {
+                        promises.push(downloadChunk(i));
+                    }
+
+                    Promise.all(promises).then(resolve).catch(reject);
+                }
+            }).on('error', reject);
+        };
+
+        getStreamInfo(urlStr);
+    });
+}
+
 function downloadAudioToTemp(audioPath) {
   return new Promise((resolve, reject) => {
     const tempFilePath = path.join(app.getPath('temp'), 'lyrics-generation-target.mp4');
@@ -28,19 +102,9 @@ function downloadAudioToTemp(audioPath) {
       if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
     } catch (e) {}
 
-    const file = fs.createWriteStream(tempFilePath);
-    https.get(audioPath, (response) => {
-      if (response.statusCode !== 200) {
-        file.close(() => reject(new Error(`Failed to download: ${response.statusCode}`)));
-        return;
-      }
-
-      response.pipe(file);
-      file.on('finish', () => file.close(() => resolve(tempFilePath)));
-    }).on('error', (err) => {
-      try { fs.unlinkSync(tempFilePath); } catch (e) {}
-      reject(err);
-    });
+    fastDownload(audioPath, tempFilePath, false, null)
+      .then(() => resolve(tempFilePath))
+      .catch(reject);
   });
 }
 
@@ -363,6 +427,88 @@ if (!gotTheLock) {
         }
     });
 
+    ipcMain.handle('download-song-with-metadata', async (event, songInfo) => {
+        const { dialog } = require('electron');
+        const defaultPath = path.join(app.getPath('downloads'), `${songInfo.title} - ${songInfo.artist}.mp3`.replace(/[\\/:*?"<>|]/g, ''));
+        const { canceled, filePath } = await dialog.showSaveDialog(win, {
+            title: 'Save Song',
+            defaultPath: defaultPath,
+            filters: [{ name: 'Audio', extensions: ['mp3', 'm4a'] }]
+        });
+        
+        if (canceled || !filePath) return { success: false, error: 'Cancelled' };
+
+        try {
+            const tempAudioPath = path.join(app.getPath('temp'), 'dl-audio-' + Date.now() + '.m4a');
+            
+            const downloadWithRedirect = (urlStr, destPath, isAudio) => {
+                return fastDownload(urlStr, destPath, isAudio, event);
+            };
+
+            await downloadWithRedirect(songInfo.url, tempAudioPath, true);
+            
+            let ffmpegPath = 'ffmpeg';
+            try { 
+                let rawFfmpeg = require('ffmpeg-static'); 
+                if (rawFfmpeg.includes('app.asar')) {
+                    rawFfmpeg = rawFfmpeg.replace('app.asar', 'app.asar.unpacked');
+                }
+                ffmpegPath = rawFfmpeg.replace(/\\/g, '/');
+            } catch(e) {}
+
+            const cp = require('child_process');
+            const util = require('util');
+            const execAsync = util.promisify(cp.exec);
+
+            let tempThumbPath = null;
+            if (songInfo.cover) {
+                tempThumbPath = path.join(app.getPath('temp'), 'temp-cover-' + Date.now() + '.jpg');
+                await downloadWithRedirect(songInfo.cover, tempThumbPath, false);
+            }
+
+            const isMp3 = filePath.toLowerCase().endsWith('.mp3');
+            
+            let cmd = `"${ffmpegPath}" -y -i "${tempAudioPath}"`;
+            if (tempThumbPath) {
+                cmd += ` -i "${tempThumbPath}" -map 0:a -map 1:v`;
+            } else {
+                cmd += ` -map 0:a`;
+            }
+            
+            if (isMp3) {
+                // If saved as mp3, we must transcode audio (since source is likely AAC/M4A) and use ID3v2.3 for Windows Explorer
+                cmd += ` -c:a libmp3lame -b:a 320k`;
+                if (tempThumbPath) {
+                    cmd += ` -c:v mjpeg -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (front)"`;
+                } else {
+                    cmd += ` -id3v2_version 3`;
+                }
+            } else {
+                // For M4A, we copy audio but MUST use mjpeg for the video stream so Windows Explorer sees the cover
+                cmd += ` -c:a copy`;
+                if (tempThumbPath) {
+                    cmd += ` -c:v mjpeg -disposition:v:0 attached_pic`;
+                }
+            }
+            
+            const safeTitle = (songInfo.title || 'Unknown').replace(/"/g, '\\"');
+            const safeArtist = (songInfo.artist || 'Unknown Artist').replace(/"/g, '\\"');
+            cmd += ` -metadata title="${safeTitle}" -metadata artist="${safeArtist}" -metadata album="${safeTitle}" "${filePath}"`;
+
+            await execAsync(cmd);
+
+            try { fs.unlinkSync(tempAudioPath); } catch(e) {}
+            if (tempThumbPath) {
+                try { fs.unlinkSync(tempThumbPath); } catch(e) {}
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error("Download Error:", error);
+            return { success: false, error: error.message };
+        }
+    });
+
     win = new BrowserWindow({
       width: 1250, height: 850, autoHideMenuBar: true, title: "Pro Media Player", icon: __dirname + '/icon.ico',
       webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }
@@ -385,6 +531,13 @@ if (!gotTheLock) {
     // LOAD THE UI
     win.loadFile('index.html');
     powerSaveBlocker.start('prevent-app-suspension'); 
+
+    win.webContents.on('did-finish-load', () => {
+        const filePath = process.argv.find(arg => arg.toLowerCase().endsWith('.mp3'));
+        if (filePath && fs.existsSync(filePath)) {
+            win.webContents.send('open-external-file', filePath);
+        }
+    }); 
 
     // Handle second instance (restore window and handle file args)
     app.on('second-instance', (event, commandLine) => {

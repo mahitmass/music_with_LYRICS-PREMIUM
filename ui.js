@@ -178,7 +178,17 @@ function downloadTrack() {
     const s = queue[curIdx];
     if (!s) return;
     showToast(`Preparing download for: ${s.t}...`);
-    require('electron').shell.openExternal(s.p);
+    require('electron').ipcRenderer.invoke('download-song-with-metadata', {
+        title: s.t,
+        artist: s.a,
+        url: s.p,
+        cover: s.cover
+    }).then(result => {
+        if (result && result.success) showToast(`Downloaded: ${s.t}`);
+        else if (result && result.error !== 'Cancelled') showToast(`Download failed: ${result.error}`);
+    }).catch(err => {
+        showToast(`Download failed.`);
+    });
     toggleMenu();
 }
 
@@ -235,8 +245,17 @@ function extractAlbumArt(song) {
                         const bytes = new Uint8Array(picture.data);
                         for (let i = 0; i < bytes.byteLength; i++) b64 += String.fromCharCode(bytes[i]);
                         const b = "data:" + picture.format + ";base64," + window.btoa(b64);
+                        song.cover = b;
                         coverImg.src = b; coverImg.style.display = "block";
                         bgBlur.style.backgroundImage = `url(${b})`;
+                        if ('mediaSession' in navigator) {
+                            navigator.mediaSession.metadata = new MediaMetadata({
+                                title: song.t,
+                                artist: song.a,
+                                artwork: [{ src: b, sizes: '512x512', type: picture.format || 'image/jpeg' }]
+                            });
+                        }
+
                     } else fallbackArt(song.t);
                 },
                 onError: () => fallbackArt(song.t)
