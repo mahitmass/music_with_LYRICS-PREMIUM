@@ -525,11 +525,21 @@ function addToHistory(song) {
     // Remove any previous entries of this exact song
     history = history.filter(s => getUid(s) !== currentUid);
     
+    // Strip base64 cover art to prevent localStorage bloat
+    const safeSong = Object.assign({}, song);
+    if (safeSong.cover && safeSong.cover.startsWith('data:')) delete safeSong.cover;
+    
     // Add to the top of history
-    history.unshift(song);
+    history.unshift(safeSong);
     
     if (history.length > 150) history.pop();
-    localStorage.setItem('playHistory', JSON.stringify(history));
+    try {
+        localStorage.setItem('playHistory', JSON.stringify(history));
+    } catch (e) {
+        // If still too large, trim history aggressively
+        history = history.slice(0, 50);
+        try { localStorage.setItem('playHistory', JSON.stringify(history)); } catch (e2) {}
+    }
     
     if (document.getElementById('view-history') && document.getElementById('view-history').classList.contains('active')) {
         if (typeof renderHistoryView === 'function') renderHistoryView();

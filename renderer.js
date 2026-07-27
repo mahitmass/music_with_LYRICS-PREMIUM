@@ -185,14 +185,50 @@
     // --- SAVE / RESTORE STATE ---
     // ==========================================
     function saveState() {
-        localStorage.setItem('playerQueue', JSON.stringify(queue));
-        localStorage.setItem('playerIdx', curIdx);
+        // Strip huge base64 cover art from local songs before saving to prevent
+        // localStorage quota overflow (5MB limit). Only URL-based covers (online songs) are kept.
+        const stripped = queue.map(s => {
+            if (s.cover && s.cover.startsWith('data:')) {
+                const copy = Object.assign({}, s);
+                delete copy.cover;
+                return copy;
+            }
+            return s;
+        });
+        try {
+            localStorage.setItem('playerQueue', JSON.stringify(stripped));
+            localStorage.setItem('playerIdx', curIdx);
+        } catch (e) {
+            // If quota is STILL exceeded (extremely large queue), try saving just the index
+            console.warn('saveState: localStorage quota exceeded, saving index only', e);
+            try { localStorage.setItem('playerIdx', curIdx); } catch (e2) {}
+        }
         if (typeof activeQMode !== 'undefined') {
-            localStorage.setItem('activeQMode', activeQMode);
-            localStorage.setItem('mainQueue', JSON.stringify(mainQueue));
-            localStorage.setItem('mainIdx', mainIdx);
-            localStorage.setItem('plQueue', JSON.stringify(plQueue));
-            localStorage.setItem('plIdx', plIdx);
+            try {
+                const strippedMain = mainQueue.map(s => {
+                    if (s.cover && s.cover.startsWith('data:')) {
+                        const copy = Object.assign({}, s);
+                        delete copy.cover;
+                        return copy;
+                    }
+                    return s;
+                });
+                const strippedPl = plQueue.map(s => {
+                    if (s.cover && s.cover.startsWith('data:')) {
+                        const copy = Object.assign({}, s);
+                        delete copy.cover;
+                        return copy;
+                    }
+                    return s;
+                });
+                localStorage.setItem('activeQMode', activeQMode);
+                localStorage.setItem('mainQueue', JSON.stringify(strippedMain));
+                localStorage.setItem('mainIdx', mainIdx);
+                localStorage.setItem('plQueue', JSON.stringify(strippedPl));
+                localStorage.setItem('plIdx', plIdx);
+            } catch (e) {
+                console.warn('saveState: could not save dual queue state', e);
+            }
         }
     }
 
