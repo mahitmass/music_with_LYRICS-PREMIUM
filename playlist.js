@@ -532,12 +532,12 @@ function addToHistory(song) {
     // Add to the top of history
     history.unshift(safeSong);
     
-    if (history.length > 150) history.pop();
+    if (history.length > 500) history = history.slice(0, 500);
     try {
         localStorage.setItem('playHistory', JSON.stringify(history));
     } catch (e) {
-        // If still too large, trim history aggressively
-        history = history.slice(0, 50);
+        // If still too large, trim history to fit
+        history = history.slice(0, 250);
         try { localStorage.setItem('playHistory', JSON.stringify(history)); } catch (e2) {}
     }
     
