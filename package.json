@@ -6,7 +6,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "fix-yt": "node -e \"require('child_process').execSync('node_modules/youtube-dl-exec/bin/yt-dlp --update-to nightly', {stdio: 'inherit'})\""
   },
   "build": {
     "appId": "com.promediaplayer.app",
