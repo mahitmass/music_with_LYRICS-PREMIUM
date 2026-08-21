@@ -678,7 +678,7 @@
                 return; 
             }
 
-            // YT song with no audio URL — search JioSaavn directly
+            // YT song with no audio URL — try YouTube Music search first, then JioSaavn
             if (s.needsAudioStream && !s.p) {
                 showToast(`Finding stream for: ${s.t}...`);
                 (async () => {
@@ -689,6 +689,32 @@
                             .replace(/\b(official|video|audio|lyric|lyrics|hd|hq|4k)\b/gi, '')
                             .replace(/\s+/g, ' ').trim();
 
+                        // ── STRATEGY 1: YouTube Music Search (via backend) ──
+                        // Uses the working yt-dlp stream server which bypasses all JioSaavn issues
+                        let foundViaYT = false;
+                        try {
+                            const ytResults = await ipcRenderer.invoke('search-yt-music', `${cleanTitle} ${cleanArtist}`);
+                            if (ytResults && ytResults.length > 0) {
+                                // Pick the first result
+                                const best = ytResults[0];
+                                const newId = best.videoId || (best.id && typeof best.id === 'string' ? best.id : null);
+                                if (newId) {
+                                    console.log(`[YT Music Fallback] Found: "${best.name || best.title}" (${newId})`);
+                                    s.ytId = newId;
+                                    s.needsAudioStream = false;
+                                    s.isYTPlaylist = false;
+                                    if (typeof saveState === 'function') saveState();
+                                    play(curIdx);
+                                    foundViaYT = true;
+                                }
+                            }
+                        } catch (ytErr) {
+                            console.warn('[YT Music Fallback] Failed:', ytErr.message);
+                        }
+
+                        if (foundViaYT) return;
+
+                        // ── STRATEGY 2: JioSaavn Search (legacy fallback) ──
                         const queries = [
                             `${cleanTitle} ${cleanArtist} official`,
                             `${cleanTitle} ${cleanArtist}`,

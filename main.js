@@ -146,6 +146,8 @@ function startYTStreamServer() {
                         getUrl: true,
                         noWarnings: true,
                         noCheckCertificates: true,
+                        impersonate: 'chrome',
+                        rmCacheDir: true,
                     });
                     audioUrl = (rawUrl || '').trim().split('\n')[0];
                     if (audioUrl) {
@@ -175,6 +177,12 @@ function startYTStreamServer() {
                 path: urlObj.pathname + urlObj.search,
                 headers: reqHeaders
             }, (proxyRes) => {
+                // If YouTube rejected the cached URL (expired/blocked), purge it so next request gets a fresh one
+                if (proxyRes.statusCode === 403 || proxyRes.statusCode === 410) {
+                    urlCache.delete(ytId);
+                    console.warn(`[YT Stream] Cached URL for ${ytId} returned ${proxyRes.statusCode}, purged from cache`);
+                }
+
                 // Attach CORS headers so Web Audio API (Visualizer) doesn't output zeroes
                 const resHeaders = {
                     'Content-Type': proxyRes.headers['content-type'] || 'audio/webm',
@@ -269,7 +277,8 @@ if (!gotTheLock) {
                     noWarnings: true,
                     noCheckCertificate: true,
                     ignoreErrors: true,
-                    noCacheDir: true, 
+                    noCacheDir: true,
+                    impersonate: 'chrome',
                 }
             );
 
