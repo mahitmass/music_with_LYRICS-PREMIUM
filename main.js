@@ -454,7 +454,18 @@ if (!gotTheLock) {
                 return fastDownload(urlStr, destPath, isAudio, event);
             };
 
-            await downloadWithRedirect(songInfo.url, tempAudioPath, true);
+            let downloadUrl = songInfo.url;
+            console.log(`[Download Request] Original URL: ${downloadUrl}`);
+            console.log(`[Download Request] Current Stream Port: ${ytStreamPort}`);
+            
+            // Fix stale port issues if downloading a song queued in a previous session
+            if (typeof downloadUrl === 'string' && downloadUrl.includes('127.0.0.1:') && ytStreamPort) {
+                downloadUrl = downloadUrl.replace(/127\.0\.0\.1:\d+/, `127.0.0.1:${ytStreamPort}`);
+                console.log(`[Download Request] Replaced URL: ${downloadUrl}`);
+            }
+
+            console.log(`[Download Request] Proceeding to download audio from: ${downloadUrl}`);
+            await downloadWithRedirect(downloadUrl, tempAudioPath, true);
             
             let ffmpegPath = 'ffmpeg';
             try { 
@@ -502,9 +513,35 @@ if (!gotTheLock) {
             
             const safeTitle = (songInfo.title || 'Unknown').replace(/"/g, '\\"');
             const safeArtist = (songInfo.artist || 'Unknown Artist').replace(/"/g, '\\"');
-            cmd += ` -metadata title="${safeTitle}" -metadata artist="${safeArtist}" -metadata album="${safeTitle}" "${filePath}"`;
+            cmd += ` -threads 0 -metadata title="${safeTitle}" -metadata artist="${safeArtist}" -metadata album="${safeTitle}" "${filePath}"`;
 
-            await execAsync(cmd);
+            // Tell the UI that we are now in the slow processing phase
+            if (event) {
+                const processMsg = isMp3 ? "Converting to MP3..." : "Embedding Metadata & Art...";
+                event.sender.send('download-status', processMsg);
+            }
+
+            // Execute FFmpeg and parse progress
+            await new Promise((resolve, reject) => {
+                const ffmpegProcess = cp.exec(cmd);
+                
+                ffmpegProcess.stderr.on('data', (data) => {
+                    const output = data.toString();
+                    const timeMatch = output.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
+                    if (timeMatch && event) {
+                        event.sender.send('download-status', `Converting to MP3: ${timeMatch[1].split('.')[0]}...`);
+                    }
+                });
+
+                ffmpegProcess.on('close', (code) => {
+                    if (code === 0) resolve();
+                    else reject(new Error(`FFmpeg exited with code ${code}`));
+                });
+
+                ffmpegProcess.on('error', (err) => {
+                    reject(err);
+                });
+            });
 
             try { fs.unlinkSync(tempAudioPath); } catch(e) {}
             if (tempThumbPath) {

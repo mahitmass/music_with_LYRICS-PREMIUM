@@ -361,6 +361,12 @@
         }
     });
 
+    ipcRenderer.on('download-status', (event, msg) => {
+        if (typeof showToast === 'function') {
+            showToast(msg);
+        }
+    });
+
    // ==========================================
     // --- VOLUME CONTROL & MUTE ---
     // ==========================================
