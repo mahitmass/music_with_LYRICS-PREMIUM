@@ -185,9 +185,13 @@ function downloadTrack() {
         cover: s.cover
     }).then(result => {
         if (result && result.success) showToast(`Downloaded: ${s.t}`);
-        else if (result && result.error !== 'Cancelled') showToast(`Download failed: ${result.error}`);
+        else if (result && result.error !== 'Cancelled') {
+            showToast(`Metadata download failed. Opening raw stream...`);
+            require('electron').shell.openExternal(s.p);
+        }
     }).catch(err => {
-        showToast(`Download failed.`);
+        showToast(`Metadata download failed. Opening raw stream...`);
+        require('electron').shell.openExternal(s.p);
     });
     toggleMenu();
 }

@@ -501,8 +501,8 @@ body:not(.immersive) .hover-queue-hitbox {
     right: -1000px !important;
 }
 
-/* ONLY open when explicitly hovered */
-.hover-queue-hitbox:hover ~ #hover-q, #hover-q:hover { right: 0 !important; }
+/* ONLY open when explicitly hovered or dragged over */
+.hover-queue-hitbox:hover ~ #hover-q, #hover-q:hover, #hover-q.drag-active { right: 0 !important; }
 body.immersive #hover-q { display: flex; flex-direction: column; }
 
 /* The Glowing Hint Arrow */

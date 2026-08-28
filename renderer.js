@@ -1375,6 +1375,9 @@
     function drop(e, i) {
         e.preventDefault(); e.stopPropagation();
         e.currentTarget.style.boxShadow = '';
+        const hoverQueue = document.getElementById('hover-q');
+        if (hoverQueue) hoverQueue.classList.remove('drag-active');
+        
         const fromText = e.dataTransfer.getData('text/plain');
         if (!fromText && e.dataTransfer.files.length > 0) { insertFilesAt(e.dataTransfer.files, i); return; }
         const from = parseInt(fromText);
@@ -1435,6 +1438,33 @@
             if (draggedIdx === null && e.dataTransfer.files.length > 0) insertFilesAt(e.dataTransfer.files, queue.length);
         });
     }
+
+    const hoverHitbox = document.querySelector('.hover-queue-hitbox');
+    const hoverQueue = document.getElementById('hover-q');
+    if (hoverHitbox && hoverQueue) {
+        hoverHitbox.addEventListener('dragenter', (e) => {
+            if (document.body.classList.contains('immersive')) hoverQueue.classList.add('drag-active');
+        });
+        hoverQueue.addEventListener('dragover', (e) => e.preventDefault());
+        hoverQueue.addEventListener('dragleave', (e) => {
+            if (!hoverQueue.contains(e.relatedTarget)) hoverQueue.classList.remove('drag-active');
+        });
+        hoverQueue.addEventListener('drop', (e) => {
+            hoverQueue.classList.remove('drag-active');
+            e.preventDefault(); e.stopPropagation();
+            if (typeof draggedIdx === 'undefined' || draggedIdx === null) {
+                if (e.dataTransfer.files.length > 0) insertFilesAt(e.dataTransfer.files, queue.length);
+            }
+        });
+    }
+
+    // Safety fallback: if they drop anywhere, or drag out of the window entirely, close the queue
+    document.addEventListener('drop', () => {
+        if (hoverQueue) hoverQueue.classList.remove('drag-active');
+    });
+    document.addEventListener('dragleave', (e) => {
+        if (!e.relatedTarget && hoverQueue) hoverQueue.classList.remove('drag-active');
+    });
 
     // ==========================================
     // --- KEYBOARD SHORTCUTS ---
