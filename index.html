@@ -20,6 +20,14 @@
       <h1 style="font-weight:900;">Alternative Lyrics</h1>
       <span class="material-icons-round retry-check-btn" onclick="exitRetryUI()" style="cursor:pointer">close</span>
     </div>
+    <div style="width:100%; max-width:900px; margin-bottom:20px; display:flex; gap:10px; align-items:center;">
+      <input type="text" id="retry-custom-search" placeholder="Search lyrics manually (e.g. Talk Selena Gomez)" 
+             style="flex:1; padding:12px 18px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.06); color:white; font-size:0.95rem; outline:none; font-family:inherit;"
+             onkeydown="if(event.key==='Enter') retryCustomSearch()">
+      <button onclick="retryCustomSearch()" style="padding:12px 20px; border-radius:10px; border:none; background:var(--accent); color:black; font-weight:700; cursor:pointer; font-size:0.9rem; white-space:nowrap;">
+        <span class="material-icons-round" style="font-size:18px; vertical-align:middle; margin-right:4px;">search</span>Search
+      </button>
+    </div>
     <div style="overflow-y:auto; width:100%; flex:1; display:flex; flex-direction:column; align-items:center;" id="retry-results-container"></div>
   </div>
 

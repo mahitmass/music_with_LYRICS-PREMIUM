@@ -409,18 +409,47 @@ function toggleEditMode() {
 // ==========================================
 // --- RETRY UI (ALTERNATIVE LYRICS PICKER) ---
 // ==========================================
-async function triggerRetryUI() {
-    if (!queue[curIdx]) return;
-    document.body.classList.add('retry-mode');
-    document.body.classList.remove('immersive');
+// --- Smart Title Match Score (0-1) ---
+function getTitleMatchScore(searchTitle, resultTitle) {
+    const normalize = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    const sTitle = normalize(searchTitle);
+    const rTitle = normalize(resultTitle);
+    
+    // Perfect match
+    if (sTitle === rTitle) return 1.0;
+    
+    // Check if the result title is exactly the search title (ignore extra words)
+    const sWords = sTitle.split(/\s+/).filter(w => w.length > 0);
+    const rWords = rTitle.split(/\s+/).filter(w => w.length > 0);
+    
+    // Penalize if result has way more words than the search
+    // e.g. searching "Talk" should penalize "We Don't Talk Anymore" heavily
+    if (rWords.length > sWords.length * 2) return 0.2;
+    
+    // Check how many search words appear in the result
+    const matchCount = sWords.filter(w => rWords.includes(w)).length;
+    const coverage = matchCount / sWords.length;
+    
+    // Extra penalty if result has many extra words not in the search
+    const extraWords = rWords.length - matchCount;
+    const extraPenalty = Math.max(0, 1 - (extraWords * 0.15));
+    
+    return coverage * extraPenalty;
+}
 
-    const container = document.getElementById('retry-results-container');
-    container.innerHTML = `<div style="padding:50px; color:var(--accent); text-align:center; display:flex; gap:15px; align-items:center; justify-content:center"><span class="material-icons-round" style="animation: spin 1s linear infinite; font-size:32px">sync</span>Searching alternative synced lyrics...</div>`;
+// --- Smart Duration Score (0-1) ---
+function getDurationScore(targetDuration, resultDuration) {
+    if (!targetDuration || !resultDuration) return 0.5; // neutral if unknown
+    const diff = Math.abs(targetDuration - resultDuration);
+    if (diff <= 5) return 1.0;
+    if (diff <= 15) return 0.8;
+    if (diff <= 30) return 0.5;
+    if (diff <= 60) return 0.2;
+    return 0.05; // way off
+}
 
-    const s = queue[curIdx];
-    const q = `${encodeURIComponent((s.a || '') + ' ' + getCleanTitle(s))}`;
-    const headers = { 'User-Agent': 'music-player-mass/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
-
+// --- Render retry results into container ---
+function renderRetryResults(results, container) {
     const aiRetryButtonHTML = `
         <div class="retry-item" onclick="exitRetryUI(); triggerManualAIGeneration();" style="text-align:center; border: 1px dashed rgba(76,194,255,0.4); background: rgba(76,194,255,0.05); margin-top: 10px;">
             <div style="color:var(--accent); font-size:1.1rem; font-weight:700; display:flex; align-items:center; justify-content:center; gap:10px;">
@@ -430,58 +459,147 @@ async function triggerRetryUI() {
         </div>
     `;
 
+    if (results.length === 0) {
+        container.innerHTML = `<p style="padding:30px; color:var(--dim); text-align:center">No alternative lyrics found in database.</p>${aiRetryButtonHTML}`;
+        return;
+    }
+
+    let html = "";
+    results.forEach((result, index) => {
+        const isSynced = !!result.syncedLyrics;
+        const label = isSynced ? "TIMED" : "TEXT ONLY";
+        const labelColor = isSynced ? "var(--accent)" : "#888";
+        const fullLrc = result.syncedLyrics || result.plainLyrics || "No text available.";
+        let lines = fullLrc.split('\n');
+        let plainLines = lines.map(l => l.replace(/\[\d{2}:\d{2}\.\d+\]/g, '').trim()).filter(l => l.length > 0);
+        let previewText = plainLines.slice(0, 2).join('<br>') || "Instrumental or plain text.";
+        const durText = result.duration ? `${Math.floor(result.duration / 60)}:${Math.floor(result.duration % 60).toString().padStart(2, '0')}` : '?:??';
+
+        // Show match quality badge
+        const scorePercent = result._matchScore !== undefined ? Math.round(result._matchScore * 100) : null;
+        const scoreBadge = scorePercent !== null ? `<div style="font-size: 0.7rem; font-weight: 700; color: ${scorePercent >= 70 ? '#4caf50' : scorePercent >= 40 ? '#ff9800' : '#f44336'}; background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; white-space: nowrap;">⚡ ${scorePercent}%</div>` : '';
+
+        html += `
+        <div class="retry-item" onclick="openRetryPreview(${index})">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; padding-right:40px;">
+               <div style="padding-right: 10px;">
+                  <div style="color:white; font-size:1.1rem; font-weight:700;">${result.trackName}</div>
+                  <div style="color:var(--dim); font-size:0.9rem; margin-bottom:5px">${result.artistName}</div>
+               </div>
+               <div style="display:flex; gap:8px; align-items:center; margin-top:3px;">
+                  ${scoreBadge}
+                  <div style="font-size: 0.7rem; font-weight: 700; color: #aaa; background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; white-space: nowrap;">⏱ ${durText}</div>
+                  <div style="font-size: 0.7rem; font-weight: 900; color: ${labelColor}; border: 1px solid ${labelColor}; padding: 2px 6px; border-radius: 4px; letter-spacing: 1px; white-space: nowrap;">${label}</div>
+               </div>
+            </div>
+            <div style="color:rgba(255,255,255,0.4); font-family:monospace; font-size:0.9rem; border-top:1px solid #222; padding-top:8px">${previewText}</div>
+            <span class="material-icons-round retry-tick"
+                  onclick="event.stopPropagation(); selectedRetryIndex=${index}; selectRetryLyrics();"
+                  style="opacity:1; pointer-events:auto; cursor:pointer;"
+                  title="Select this version">check_circle</span>
+        </div>`;
+    });
+
+    container.innerHTML = html + aiRetryButtonHTML;
+}
+
+// --- Score and sort results ---
+function scoreAndSortResults(data, searchTitle, targetDuration) {
+    if (!data || !Array.isArray(data)) return [];
+    
+    return data.map(d => {
+        const titleScore = getTitleMatchScore(searchTitle, d.trackName || '');
+        const durScore = getDurationScore(targetDuration, d.duration);
+        const timedBonus = d.syncedLyrics ? 0.1 : 0;
+        d._matchScore = (titleScore * 0.55) + (durScore * 0.35) + timedBonus;
+        return d;
+    }).sort((a, b) => b._matchScore - a._matchScore);
+}
+
+async function triggerRetryUI() {
+    if (!queue[curIdx]) return;
+    document.body.classList.add('retry-mode');
+    document.body.classList.remove('immersive');
+
+    const container = document.getElementById('retry-results-container');
+    container.innerHTML = `<div style="padding:50px; color:var(--accent); text-align:center; display:flex; gap:15px; align-items:center; justify-content:center"><span class="material-icons-round" style="animation: spin 1s linear infinite; font-size:32px">sync</span>Searching alternative synced lyrics...</div>`;
+
+    const s = queue[curIdx];
+    const cleanTitle = getCleanTitle(s);
+    const artistName = s.a || '';
+    const headers = { 'User-Agent': 'music-player-mass/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
+    const targetDur = audio.duration > 0 ? audio.duration : 0;
+
+    // Pre-fill custom search bar
+    const searchInput = document.getElementById('retry-custom-search');
+    if (searchInput) searchInput.value = `${artistName} ${cleanTitle}`.trim();
+
     try {
-        const dur = audio.duration > 0 ? `&duration=${Math.round(audio.duration)}` : '';
-        let res = await fetch(`https://lrclib.net/api/search?q=${q}${dur}`, { headers });
+        // Strategy 1: Exact match with track_name + artist_name (strict)
+        let allResults = [];
+        const exactRes = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanTitle)}&artist_name=${encodeURIComponent(artistName)}`, { headers });
+        if (exactRes.ok) {
+            const exactData = await exactRes.json();
+            if (exactData && Array.isArray(exactData)) allResults.push(...exactData);
+        }
+
+        // Strategy 2: Broad q= search for additional results
+        const broadQ = encodeURIComponent(`${artistName} ${cleanTitle}`);
+        const broadRes = await fetch(`https://lrclib.net/api/search?q=${broadQ}`, { headers });
+        if (broadRes.ok) {
+            const broadData = await broadRes.json();
+            if (broadData && Array.isArray(broadData)) {
+                // Deduplicate by id
+                const existingIds = new Set(allResults.map(r => r.id));
+                broadData.forEach(d => { if (!existingIds.has(d.id)) allResults.push(d); });
+            }
+        }
+
+        // Score and sort all results
+        const scored = scoreAndSortResults(allResults, cleanTitle, targetDur);
+        
+        // Take top results: prioritize timed, then plain
+        let timed = scored.filter(d => d.syncedLyrics);
+        let plain = scored.filter(d => !d.syncedLyrics && d.plainLyrics);
+        currentRetryData = [...timed.slice(0, 6), ...plain.slice(0, 3)];
+
+        renderRetryResults(currentRetryData, container);
+
+    } catch (e) {
+        container.innerHTML = `<p style="padding:50px; color:#ff4c4c; text-align:center">App Error: ${e.message}</p>`;
+    }
+}
+
+// --- Custom Search from Retry UI ---
+async function retryCustomSearch() {
+    const searchInput = document.getElementById('retry-custom-search');
+    if (!searchInput || !searchInput.value.trim()) return;
+
+    const container = document.getElementById('retry-results-container');
+    container.innerHTML = `<div style="padding:50px; color:var(--accent); text-align:center; display:flex; gap:15px; align-items:center; justify-content:center"><span class="material-icons-round" style="animation: spin 1s linear infinite; font-size:32px">sync</span>Searching...</div>`;
+
+    const customQuery = searchInput.value.trim();
+    const headers = { 'User-Agent': 'music-player-mass/1.0.0 (https://github.com/mahitmass/music_with_LYRICS)' };
+    const targetDur = audio.duration > 0 ? audio.duration : 0;
+
+    try {
+        const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(customQuery)}`, { headers });
         if (!res.ok) throw new Error("Database offline");
 
         let data = await res.json();
         if (!data) data = [];
 
-        let timed = data.filter(d => d.syncedLyrics);
-        let plain = data.filter(d => !d.syncedLyrics && d.plainLyrics);
-        currentRetryData = [...timed.slice(0, 4), ...plain.slice(0, 2)];
+        // Score using the custom query as the title reference
+        const scored = scoreAndSortResults(data, customQuery, targetDur);
 
-        if (currentRetryData.length === 0) {
-            container.innerHTML = `<p style="padding:30px; color:var(--dim); text-align:center">No alternative lyrics found in database.</p>${aiRetryButtonHTML}`;
-            return;
-        }
+        let timed = scored.filter(d => d.syncedLyrics);
+        let plain = scored.filter(d => !d.syncedLyrics && d.plainLyrics);
+        currentRetryData = [...timed.slice(0, 6), ...plain.slice(0, 3)];
 
-        let html = "";
-        currentRetryData.forEach((result, index) => {
-            const isSynced = !!result.syncedLyrics;
-            const label = isSynced ? "TIMED" : "TEXT ONLY";
-            const labelColor = isSynced ? "var(--accent)" : "#888";
-            const fullLrc = result.syncedLyrics || result.plainLyrics || "No text available.";
-            let lines = fullLrc.split('\n');
-            let plainLines = lines.map(l => l.replace(/\[\d{2}:\d{2}\.\d+\]/g, '').trim()).filter(l => l.length > 0);
-            let previewText = plainLines.slice(0, 2).join('<br>') || "Instrumental or plain text.";
-            const durText = result.duration ? `${Math.floor(result.duration / 60)}:${Math.floor(result.duration % 60).toString().padStart(2, '0')}` : '?:??';
-
-            html += `
-            <div class="retry-item" onclick="openRetryPreview(${index})">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; padding-right:40px;">
-                   <div style="padding-right: 10px;">
-                      <div style="color:white; font-size:1.1rem; font-weight:700;">${result.trackName}</div>
-                      <div style="color:var(--dim); font-size:0.9rem; margin-bottom:5px">${result.artistName}</div>
-                   </div>
-                   <div style="display:flex; gap:8px; align-items:center; margin-top:3px;">
-                      <div style="font-size: 0.7rem; font-weight: 700; color: #aaa; background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; white-space: nowrap;">⏱ ${durText}</div>
-                      <div style="font-size: 0.7rem; font-weight: 900; color: ${labelColor}; border: 1px solid ${labelColor}; padding: 2px 6px; border-radius: 4px; letter-spacing: 1px; white-space: nowrap;">${label}</div>
-                   </div>
-                </div>
-                <div style="color:rgba(255,255,255,0.4); font-family:monospace; font-size:0.9rem; border-top:1px solid #222; padding-top:8px">${previewText}</div>
-                <span class="material-icons-round retry-tick"
-                      onclick="event.stopPropagation(); selectedRetryIndex=${index}; selectRetryLyrics();"
-                      style="opacity:1; pointer-events:auto; cursor:pointer;"
-                      title="Select this version">check_circle</span>
-            </div>`;
-        });
-
-        container.innerHTML = html + aiRetryButtonHTML;
+        renderRetryResults(currentRetryData, container);
 
     } catch (e) {
-        container.innerHTML = `<p style="padding:50px; color:#ff4c4c; text-align:center">App Error: ${e.message}</p>`;
+        container.innerHTML = `<p style="padding:50px; color:#ff4c4c; text-align:center">Search Error: ${e.message}</p>`;
     }
 }
 
