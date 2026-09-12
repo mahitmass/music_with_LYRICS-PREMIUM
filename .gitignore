@@ -7,3 +7,6 @@ build/
 *.dmg
 *.zip
 .env
+backup_features/
+auth.js
+video.js

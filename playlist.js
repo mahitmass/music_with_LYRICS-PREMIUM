@@ -39,6 +39,10 @@ function switchQueueMode(mode) {
 // --- YOUTUBE PLAYLIST IMPORT MODAL ---
 // ==========================================
 window.importYTPlaylist = function () {
+    if (!window.isOnlineMode) {
+        if (typeof showToast === 'function') showToast("🌐 Please enable Online Mode to import YouTube playlists.");
+        return;
+    }
     let modal = document.createElement('div');
     modal.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.8);z-index:30000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(10px);";
     modal.innerHTML = `
@@ -141,6 +145,7 @@ async function openPlaylist(playlistId, titleName) {
 
     let playlistData = null;
     let hasRenderedFromCache = false;
+    currentLoadedPlaylist = []; // <--- CLEAR PREVIOUS PLAYLIST DATA!
 
     // ── STEP 1: INSTANT CACHE RENDER ──
     const _cacheKey = `yt-pl-cache-${playlistId}`;
@@ -395,8 +400,8 @@ function showSidebarPlaylistCtx(e, id, title) {
     const safeTitle = title.replace(/'/g, "\\'");
     menu.innerHTML = `
         <div class="context-item" onclick="fetchYTPlaylist('${id}', '${safeTitle}')"><span class="material-icons-round">play_circle</span> Open Playlist</div>
-        <div class="context-item" onclick="addYTPlaylistToQueue('${id}', '${safeTitle}', 'next')"><span class="material-icons-round">queue_play_next</span> Play Next</div>
-        <div class="context-item" onclick="addYTPlaylistToQueue('${id}', '${safeTitle}', 'bottom')"><span class="material-icons-round">add_to_queue</span> Add to Bottom</div>
+        <div class="context-item" onclick="queuePlaylistFromSidebar('${id}', '${safeTitle}', 'next')"><span class="material-icons-round">queue_play_next</span> Play Next</div>
+        <div class="context-item" onclick="queuePlaylistFromSidebar('${id}', '${safeTitle}', 'bottom')"><span class="material-icons-round">add_to_queue</span> Add to Bottom</div>
         <div class="context-item" onclick="removePlaylist('${id}'); document.getElementById('custom-context-menu').style.display='none';"><span class="material-icons-round">delete_outline</span> Remove</div>
     `;
     const menuHeight = 140;
@@ -405,6 +410,30 @@ function showSidebarPlaylistCtx(e, id, title) {
     menu.style.left = `${e.pageX}px`;
     menu.style.top = `${yPos}px`;
     menu.style.display = 'block';
+}
+
+window.queuePlaylistFromSidebar = async function(id, title, pos) {
+    const menu = document.getElementById('custom-context-menu');
+    if (menu) menu.style.display = 'none';
+
+    try {
+        // 1. Open and wait for the playlist to sync (exactly as requested)
+        await fetchYTPlaylist(id, title);
+
+        // 2. Queue it up using the 'temp' ID so it doesn't re-fetch
+        if (currentLoadedPlaylist && currentLoadedPlaylist.length > 0) {
+            await addYTPlaylistToQueue('temp', title, pos);
+        } else {
+            if (typeof showToast === 'function') showToast("❌ Playlist failed to load.");
+        }
+    } catch (e) {
+        console.error("Failed to queue playlist:", e);
+    } finally {
+        // 3. Return to home
+        if (typeof switchView === 'function') {
+            switchView('home');
+        }
+    }
 }
 
 function showLocalPlaylistCtx(e) {
@@ -590,7 +619,7 @@ function renderHistoryView() {
         let encodedSong = encodeURIComponent(JSON.stringify(s));
         
         html += `
-        <div class="track-row" data-type="history-item" data-song="${encodedSong}" onclick="playFromHistory(${i})" style="display: flex !important; flex-direction: row !important; align-items: center !important; padding: 10px 15px !important; border-radius: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <div class="track-row" data-type="history-item" data-song="${encodedSong}" data-local-path="${!s.isOnline ? s.p : ''}" data-img-id="${imgId}" onclick="playFromHistory(${i})" style="display: flex !important; flex-direction: row !important; align-items: center !important; padding: 10px 15px !important; border-radius: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05);">
             <div style="width: 30px !important; min-width: 30px !important; text-align: left !important; color: var(--dim) !important; font-size: 0.9rem !important; flex-shrink: 0 !important; margin: 0 !important; padding: 0 !important;">${i + 1}</div>
             ${coverHtml}
             <div style="display: flex !important; flex-direction: column !important; overflow: hidden !important; flex-grow: 1 !important; margin-left: 15px !important; margin-right: 15px !important; padding: 0 !important;">
@@ -601,13 +630,39 @@ function renderHistoryView() {
                 <span class="material-icons-round" style="color:var(--dim) !important; font-size:20px !important; margin: 0 !important; padding: 0 !important;" title="${s.isOnline ? 'Online Stream' : 'Local File'}">${s.isOnline ? 'cloud' : 'folder'}</span>
             </div>
         </div>`;
-        
-        // Asynchronously fetch local art so the screen renders instantly without freezing!
-        if (!s.isOnline && s.p) {
-            setTimeout(() => extractHistoryLocalArt(s.p, imgId), 10);
-        }
     });
     container.innerHTML = html;
+
+    // Use IntersectionObserver to prioritize visible album art
+    if (window.historyArtObserver) {
+        window.historyArtObserver.disconnect();
+    }
+    window.historyArtObserver = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const path = entry.target.getAttribute('data-local-path');
+                const imgId = entry.target.getAttribute('data-img-id');
+                if (path && imgId) {
+                    // Start extracting
+                    if (typeof extractHistoryLocalArt === 'function') {
+                        extractHistoryLocalArt(path, imgId);
+                    }
+                    // Stop observing this element so we don't extract again
+                    observer.unobserve(entry.target);
+                    // Clear path so it isn't triggered again
+                    entry.target.removeAttribute('data-local-path');
+                }
+            }
+        });
+    }, {
+        root: document.getElementById('view-history'),
+        rootMargin: '100px 0px', // Preload a bit before they scroll into view
+        threshold: 0.1
+    });
+
+    // Observe all rows that have a local path
+    const rows = container.querySelectorAll('.track-row[data-local-path]:not([data-local-path=""])');
+    rows.forEach(row => window.historyArtObserver.observe(row));
 }
 
 function extractHistoryLocalArt(filePath, targetElementId) {
@@ -781,8 +836,10 @@ window.addYTPlaylistToQueue = async function(playlistId, playlistTitleOrPosition
     const menu = document.getElementById('custom-context-menu');
     if (menu) menu.style.display = 'none';
 
-    showToast("⏳ Loading playlist...");
-    await fetchYTPlaylist(playlistId, playlistTitle);
+    if (playlistId !== 'temp') {
+        showToast("⏳ Loading playlist...");
+        await fetchYTPlaylist(playlistId, playlistTitle);
+    }
 
     if (!currentLoadedPlaylist || currentLoadedPlaylist.length === 0) {
         showToast("❌ Playlist failed to load.");
@@ -848,4 +905,6 @@ function filterPlaylistTracks(query) {
         }
     });
 }
-//yo
+
+// Initialize the model globally!
+aiUserModel = loadAiUserModel();

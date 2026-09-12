@@ -1,3 +1,4 @@
+process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
 const { app, BrowserWindow, powerSaveBlocker, globalShortcut, ipcMain, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');

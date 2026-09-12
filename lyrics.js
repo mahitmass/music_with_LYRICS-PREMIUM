@@ -519,7 +519,6 @@ function scoreAndSortResults(data, searchTitle, targetDuration) {
 async function triggerRetryUI() {
     if (!queue[curIdx]) return;
     document.body.classList.add('retry-mode');
-    document.body.classList.remove('immersive');
 
     const container = document.getElementById('retry-results-container');
     container.innerHTML = `<div style="padding:50px; color:var(--accent); text-align:center; display:flex; gap:15px; align-items:center; justify-content:center"><span class="material-icons-round" style="animation: spin 1s linear infinite; font-size:32px">sync</span>Searching alternative synced lyrics...</div>`;
@@ -628,7 +627,6 @@ function selectRetryLyrics() {
 
 function exitRetryUI() {
     document.body.classList.remove('retry-mode');
-    if (audio.duration && lyricsEnabled) document.body.classList.add('immersive');
 }
 
 function openRetryPreview(index) {

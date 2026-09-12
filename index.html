@@ -58,7 +58,7 @@
 
       <div class="sidebar-search-wrap" style="position: relative;">
         <span class="material-icons-round">search</span>
-        <input type="text" id="sidebar-search" placeholder="Search queue + online..." oninput="filterQueue(this.value, 'sidebar-search-results', true)">
+        <input type="text" id="sidebar-search" placeholder="Search queue + online..." oninput="filterQueue(this.value, 'sidebar-search-results', true)" onfocus="if(this.value) filterQueue(this.value, 'sidebar-search-results', true)">
         
         <div id="sidebar-search-results" class="search-results-dropdown" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 400px; overflow-y: auto; background: rgba(15,15,15,0.98); z-index: 1000; border: 1px solid #333; border-top: none;"></div>
       </div>
@@ -234,10 +234,11 @@
       </div>
     </div>
 
-    <div class="volume-controls">
+    <div class="volume-controls" style="display: flex; align-items: center;">
       <span class="material-icons-round ctrl-icon" onclick="toggleLyrics()" id="btn-toggle-lyrics" title="Toggle Lyrics Display">subtitles</span>
       <span class="material-icons-round ctrl-icon" id="vol-icon" onclick="toggleMute()">volume_up</span>
       <input type="range" id="vol" min="0" max="1" step="0.01" value="1">
+      <span id="online-lyrics-trigger" class="material-icons-round compact-btn" onclick="switchView('player')" title="Lyrics/Album View" style="margin-left: 10px; font-size: 28px; cursor: pointer; display: none;">keyboard_arrow_up</span>
     </div>
   </footer>
 

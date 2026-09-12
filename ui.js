@@ -56,7 +56,6 @@ document.addEventListener('mouseout', (e) => {
 function draw() {
     const sideSearch = document.getElementById('sidebar-search');
     const searchTerm = sideSearch ? sideSearch.value : '';
-    if (searchTerm) return;
 
     const qList = document.getElementById('queue-list');
     const hList = document.getElementById('hover-queue-list');
@@ -85,10 +84,14 @@ function draw() {
 
     if (qList) qList.innerHTML = html;
     if (hList) hList.innerHTML = html;
-    if (qList) qList.scrollTop = qScroll;
-    if (hList) hList.scrollTop = hScroll;
+    if (qScroll > 0) qList.scrollTop = qScroll;
+    if (hScroll > 0) hList.scrollTop = hScroll;
 
-    document.querySelectorAll('.q-title, .q-artist').forEach(syncMarqueeState);
+    // Initialize marquee for new elements
+    if (typeof syncMarqueeState === 'function') {
+        if (qList) qList.querySelectorAll('.q-title, .q-artist').forEach(syncMarqueeState);
+        if (hList) hList.querySelectorAll('.q-title, .q-artist').forEach(syncMarqueeState);
+    }
 }
 
 // ==========================================
@@ -299,7 +302,7 @@ document.addEventListener('contextmenu', (e) => {
     const playlistCard = e.target.closest('.song-card[data-type="playlist"]');
     const queueItem = e.target.closest('.item[data-type="queue-item"]');
     const globalHistoryItem = e.target.closest('[data-type="history-item"], [data-type="history-search-result"], [data-type="local-search-result"]');
-    
+
     // 🔥 NEW: Detect clicks on your imported Library Playlists
     const sidebarPlaylist = e.target.closest('.playlist-link');
 
@@ -311,7 +314,7 @@ document.addEventListener('contextmenu', (e) => {
     if (card || searchItem) {
         e.preventDefault();
         const el = card || searchItem;
-        
+
         // 🔥 THE FIX: Check if the element has a bundled 'data-song' JSON object first!
         const encodedData = el.getAttribute('data-song');
         if (encodedData) {
@@ -328,19 +331,11 @@ document.addEventListener('contextmenu', (e) => {
                 needsAudioStream: !el.getAttribute('data-url')
             };
         }
-        
+
         menuHtml = `
             <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
             <div class="context-item" onclick="addToQueueDirect(window.ctxTargetSong)"><span class="material-icons-round">playlist_add</span> Add to Bottom</div>
             <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
-        `;
-    } else if (sidebarPlaylist) {
-        // 🔥 NEW: The custom menu for Sidebar Playlists
-        e.preventDefault();
-        const plId = sidebarPlaylist.getAttribute('data-playlist-id');
-        menuHtml = `
-            <div class="context-item" onclick="addYTPlaylistToQueue('${plId}', 'next')"><span class="material-icons-round">queue_play_next</span> Play Next (All Tracks)</div>
-            <div class="context-item" onclick="addYTPlaylistToQueue('${plId}', 'bottom')"><span class="material-icons-round">playlist_add</span> Add to Bottom (All Tracks)</div>
         `;
     } else if (playlistCard) {
         e.preventDefault();
@@ -355,7 +350,7 @@ document.addEventListener('contextmenu', (e) => {
         const song = queue[qIdx];
         if (!song) return;
         window.ctxTargetSong = song;
-        
+
         // 🔥 THE FIX: Removed 'Play Now', Added 'Play Next' and 'Add to Bottom' for queue items!
         menuHtml = `
             <div class="context-item" onclick="playNextDirect(window.ctxTargetSong)"><span class="material-icons-round">queue_play_next</span> Play Next</div>
@@ -375,7 +370,7 @@ document.addEventListener('contextmenu', (e) => {
             <div class="context-item" onclick="openPlaylistPicker(window.ctxTargetSong)"><span class="material-icons-round">favorite</span> Save to Local Favorites</div>
             <div class="context-item" onclick="shareTrackDirect(window.ctxTargetSong)"><span class="material-icons-round">share</span> Share Link</div>
         `;
- } else {
+    } else {
         return;
     }
 
@@ -386,7 +381,7 @@ document.addEventListener('contextmenu', (e) => {
     menu.style.left = `${e.pageX}px`;
     menu.style.top = `${yPos}px`;
     menu.style.display = 'block';
-    
+
     // 🔥 1. The smart check goes HERE, inside the right-click event
     if (e.target.closest('#hover-q') || e.target.closest('.hover-queue-hitbox')) {
         document.body.classList.add('lock-hover-queue');
@@ -396,7 +391,7 @@ document.addEventListener('contextmenu', (e) => {
 document.addEventListener('click', (e) => {
     const menu = document.getElementById('custom-context-menu');
     if (menu && !e.target.closest('#custom-context-menu')) menu.style.display = 'none';
-    
+
     // 🔥 2. This MUST be 'remove', so the queue unlocks when you click away!
     document.body.classList.remove('lock-hover-queue');
 });
@@ -415,23 +410,23 @@ document.addEventListener('click', (e) => {
 function animateWhoosh(song, startX, startY, type) {
     const ghost = document.createElement('div');
     ghost.className = 'flying-card';
-    
+
     // 🔥 THE FIX: Safely fallback to 'Unknown Track' if the search result didn't provide a title
     const titleText = song.t || 'Unknown Track';
     const safeT = titleText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    
+
     const coverHtml = song.cover
         ? `<img src="${song.cover}" style="width:36px; height:36px; border-radius:4px; object-fit:cover;">`
         : `<div style="width:36px; height:36px; background:#333; border-radius:4px; display:flex; align-items:center; justify-content:center;"><span class="material-icons-round" style="font-size:20px;">music_note</span></div>`;
-    
+
     ghost.innerHTML = `${coverHtml}<div style="font-size:0.9rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">${safeT}</div>`;
     document.body.appendChild(ghost);
-    
+
     ghost.style.left = startX + 'px';
     ghost.style.top = startY + 'px';
     ghost.style.transform = 'scale(1)';
     void ghost.offsetWidth;
-    
+
     const sidebar = document.querySelector('.yt-sidebar');
     let targetX = 130, targetY = window.innerHeight / 2;
     if (sidebar) {
@@ -439,7 +434,7 @@ function animateWhoosh(song, startX, startY, type) {
         targetX = rect.left + (rect.width / 2) - 50;
         targetY = type === 'next' ? rect.top + 150 : rect.bottom - 100;
     }
-    
+
     ghost.style.transform = `translate(${targetX - startX}px, ${targetY - startY}px) scale(0.15) rotate(-15deg)`;
     ghost.style.opacity = '0';
     setTimeout(() => ghost.remove(), 600);
@@ -448,6 +443,13 @@ function animateWhoosh(song, startX, startY, type) {
 // ==========================================
 // --- CONTEXT MENU ACTION HELPERS ---
 // ==========================================
+function closeSearchDropdowns() {
+    const s1 = document.getElementById('sidebar-search-results');
+    const s2 = document.getElementById('imm-search-results');
+    if (s1) s1.style.display = 'none';
+    if (s2) s2.style.display = 'none';
+}
+
 function playNextDirect(song) {
     animateWhoosh(song, window.ctxMouseX, window.ctxMouseY, 'next');
     queue.splice(curIdx + 1, 0, song);
@@ -455,6 +457,7 @@ function playNextDirect(song) {
     if (typeof saveState === 'function') saveState();
     if (typeof showToast === 'function') showToast(`"${song.t}" will play next!`);
     document.getElementById('custom-context-menu').style.display = 'none';
+    closeSearchDropdowns();
 }
 
 function addToQueueDirect(song) {
@@ -464,6 +467,7 @@ function addToQueueDirect(song) {
     if (typeof saveState === 'function') saveState();
     if (typeof showToast === 'function') showToast(`"${song.t}" added to bottom of queue`);
     document.getElementById('custom-context-menu').style.display = 'none';
+    closeSearchDropdowns();
 }
 
 function openPlaylistPicker(song) {
@@ -476,6 +480,7 @@ function openPlaylistPicker(song) {
         if (typeof showToast === 'function') showToast("Already in favorites!");
     }
     document.getElementById('custom-context-menu').style.display = 'none';
+    closeSearchDropdowns();
 }
 
 function removeFromQueue(index) {
@@ -485,12 +490,14 @@ function removeFromQueue(index) {
     if (typeof draw === 'function') draw();
     if (typeof saveState === 'function') saveState();
     document.getElementById('custom-context-menu').style.display = 'none';
+    closeSearchDropdowns();
 }
 
 function shareTrackDirect(song) {
     navigator.clipboard.writeText(`Listening to ${song.t} by ${song.a} on Pro Media Player!`);
     if (typeof showToast === 'function') showToast("Share text copied!");
     document.getElementById('custom-context-menu').style.display = 'none';
+    closeSearchDropdowns();
 }
 
 // ==========================================
@@ -616,19 +623,19 @@ function initRealVisualizer() {
         try {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            
+
             // 1. Create the Visualizer Node
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 128;
             analyser.smoothingTimeConstant = 0.7;
-            
+
             // 2. Create the Audio Normalizer (Compressor) Node
             const compressor = audioCtx.createDynamicsCompressor();
-            compressor.threshold.setValueAtTime(-24, audioCtx.currentTime); 
-            compressor.knee.setValueAtTime(30, audioCtx.currentTime);       
-            compressor.ratio.setValueAtTime(12, audioCtx.currentTime);      
-            compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);  
-            compressor.release.setValueAtTime(0.25, audioCtx.currentTime);  
+            compressor.threshold.setValueAtTime(-24, audioCtx.currentTime);
+            compressor.knee.setValueAtTime(30, audioCtx.currentTime);
+            compressor.ratio.setValueAtTime(12, audioCtx.currentTime);
+            compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
+            compressor.release.setValueAtTime(0.25, audioCtx.currentTime);
 
             // 3. Daisy-chain them! Audio Element -> Compressor -> Analyzer -> Speakers
             mediaSource = audioCtx.createMediaElementSource(audioEl);
@@ -740,8 +747,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (playerEl) {
         playerEl.addEventListener('playing', () => {
             // 🔥 ALWAYS initialize the chain so the Normalizer kicks in
-            initRealVisualizer(); 
-            
+            initRealVisualizer();
+
             // But ONLY start the heavy drawing loop if we are in Cyberpunk mode
             if (document.body.classList.contains('imm-layout-1')) {
                 isDrawingWaveform = false;
@@ -752,3 +759,118 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 //yo
+// ==========================================
+// --- ONLINE MODE LOGIC ---
+// ==========================================
+function syncOnlineModeUI() {
+    const isOnline = window.isOnlineMode;
+    const knob = document.getElementById('online-mode-knob');
+    const bg = document.getElementById('online-mode-switch');
+    const icon = document.getElementById('online-mode-icon');
+    if (knob && bg && icon) {
+        if (isOnline) {
+            knob.style.left = '18px';
+            knob.style.background = 'white';
+            bg.style.background = 'var(--accent)';
+            icon.innerText = 'cloud';
+            icon.style.color = 'var(--accent)';
+        } else {
+            knob.style.left = '2px';
+            knob.style.background = '#888';
+            bg.style.background = 'rgba(255,255,255,0.1)';
+            icon.innerText = 'cloud_off';
+            icon.style.color = 'var(--dim)';
+        }
+    }
+    
+    // Dynamically apply CSS hiding
+    document.body.classList.toggle('online-mode-active', isOnline);
+
+    // Dynamically move search bar
+    const searchWrap = document.querySelector('.sidebar-search-wrap');
+    const topNav = document.querySelector('.top-nav-bar');
+    const sidebar = document.querySelector('.sidebar');
+    
+    if (searchWrap && topNav && sidebar) {
+        if (isOnline) {
+            // Move to center top nav
+            searchWrap.style.margin = '0 20px';
+            searchWrap.style.flex = '1';
+            searchWrap.style.maxWidth = '500px';
+            searchWrap.style.position = 'relative';
+            const input = searchWrap.querySelector('input');
+            if(input) {
+                input.style.width = '100%';
+                input.style.background = 'rgba(255,255,255,0.1)';
+                input.style.border = '1px solid rgba(255,255,255,0.1)';
+                input.style.padding = '10px 10px 10px 40px';
+                input.style.borderRadius = '20px';
+            }
+            const icon = searchWrap.querySelector('.material-icons-round');
+            if (icon) {
+                icon.style.position = 'absolute';
+                icon.style.left = '12px';
+                icon.style.top = '50%';
+                icon.style.transform = 'translateY(-50%)';
+            }
+            
+            // Insert it into top-nav before the history button
+            topNav.insertBefore(searchWrap, topNav.lastElementChild);
+        } else {
+            // Move back to sidebar
+            searchWrap.style = 'position: relative;';
+            const input = searchWrap.querySelector('input');
+            if (input) {
+                input.style = ''; // Reset inline styles
+            }
+            const icon = searchWrap.querySelector('.material-icons-round');
+            if (icon) {
+                icon.style = ''; // Reset inline styles
+            }
+            
+            // Insert it back below sidebar menu
+            const sidebarMenu = sidebar.querySelector('.sidebar-menu');
+            if (sidebarMenu) {
+                sidebarMenu.insertAdjacentElement('afterend', searchWrap);
+            }
+        }
+    }
+
+    if (typeof loadHomepage === 'function') loadHomepage();
+}
+
+window.toggleOnlineMode = function () {
+    // Save current state before switching
+    if (typeof saveState === 'function') saveState();
+
+    window.isOnlineMode = !window.isOnlineMode;
+    localStorage.setItem('isOnlineMode', window.isOnlineMode);
+
+    // Swap queues globally
+    if (window.isOnlineMode) {
+        queue = typeof onlineQueue !== 'undefined' ? onlineQueue : [];
+        curIdx = typeof onlineCurIdx !== 'undefined' ? onlineCurIdx : 0;
+    } else {
+        queue = typeof normalQueue !== 'undefined' ? normalQueue : [];
+        curIdx = typeof normalCurIdx !== 'undefined' ? normalCurIdx : 0;
+    }
+
+    syncOnlineModeUI();
+    if (typeof draw === 'function') draw();
+    
+    // Update player labels if queue swapped
+    if (queue.length > 0 && typeof currentSongId !== 'undefined') {
+        const s = queue[curIdx];
+        if (s && document.getElementById('cur-t')) document.getElementById('cur-t').innerText = s.t;
+        if (s && document.getElementById('cur-a')) document.getElementById('cur-a').innerText = s.a;
+    } else {
+        if (document.getElementById('cur-t')) document.getElementById('cur-t').innerText = "Nothing Playing";
+        if (document.getElementById('cur-a')) document.getElementById('cur-a').innerText = "";
+    }
+
+    if (typeof showToast === 'function') {
+        showToast(window.isOnlineMode ? '🌐 Online Mode Enabled' : '🔌 Offline Mode (Local Only)');
+    }
+};
+
+window.addEventListener('load', syncOnlineModeUI);
