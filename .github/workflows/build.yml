@@ -1,4 +1,4 @@
-name: Build Mac App
+name: Build App
 
 on:
   workflow_dispatch:
@@ -43,3 +43,43 @@ jobs:
         with:
           name: Mac-Installers
           path: dist/*.dmg
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        env:
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
+        run: npm install
+
+      - name: Download yt-dlp binary for Windows (authenticated)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p node_modules/youtube-dl-exec/bin
+          curl -L \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" \
+            -o node_modules/youtube-dl-exec/bin/yt-dlp.exe
+
+      - name: Build Windows (.exe)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build
+
+      - name: Upload the final Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Installer
+          path: dist/*.exe
